@@ -1,0 +1,28 @@
+{
+	"geode": "4.0.0-beta.1",
+	"gd": {
+		"win": "2.2074",
+		"android": "2.2074",
+		"mac": "2.2074",
+		"ios": "2.2074"
+	},
+	"id": "sheepdotcom.geode-ui-tweaks",
+	"name": "Geode UI Tweaks",
+	"version": "v0.0.1",
+	"developer": "sheepdotcom",
+	"description": "Tweak the Geode UI a bit more.",
+	"settings": {
+		"transparent-lists": {
+			"name": "Transparent Lists",
+			"description": "Makes the mod list background transparent. Best used with geode theme enabled.",
+			"type": "bool",
+			"default": false
+		},
+		"larger-logos": {
+			"name": "Larger Logos",
+			"description": "Increases the size of the logos on mod items.",
+			"type": "bool",
+			"default": false
+		}
+	}
+}
