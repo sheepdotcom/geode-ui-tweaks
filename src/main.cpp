@@ -67,6 +67,16 @@ void modsLayerModify(CCNode* modsLayer) {
 									bg->setOpacity(90);
 									bg->setColor(ccColor3B{245, 27, 27});
 								}
+								else if (bg->getColor() == ccColor3B{245, 153, 245} && bg->getOpacity() == 25) { // Outdated
+									bg->setOpacity(90);
+								}
+								else if (bg->getColor() == ccColor3B{240, 211, 42} && bg->getOpacity() == 65) { // Featured
+									bg->setOpacity(90);
+								}
+								else if (bg->getColor() == ccColor3B{63, 91, 138} && bg->getOpacity() == 85) { // Modtober
+									bg->setOpacity(90);
+									bg->setColor(ccColor3B{32, 102, 220});
+								}
 							}
 						}
 						if (auto logoSprite = node->getChildByID("logo-sprite")) {

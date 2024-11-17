@@ -1,3 +1,3 @@
-# Template Mod
+# Geode UI Tweaks
 
-Edit about.md to change this
+Tweak the Geode Mod List UI a bit.
