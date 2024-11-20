@@ -1,2 +1,5 @@
-# 1.0.0
-- Edit this file to change your mod's changelog.
+# v0.0.1
+
+- Transparent Lists
+- Larger Logos
+- Fix Mod Info Size

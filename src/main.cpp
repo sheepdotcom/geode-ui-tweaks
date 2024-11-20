@@ -13,6 +13,9 @@ bool isGeodeTheme(bool forceDisableTheme = false) {
 	return !forceDisableTheme && Loader::get()->getInstalledMod("geode.loader")->getSettingValue<bool>("enable-geode-theme");
 }
 
+// Soooo about the indentations, uh nullptr checking i guess? dont want game to randomly crash!
+// Also getting certain things might be wierd but like i dont wanna make hacky way around a private class and private members
+
 void modsLayerModify(CCNode* modsLayer) {
 	auto mod = Mod::get();
 	if (auto modListFrame = modsLayer->getChildByID("mod-list-frame")) {
@@ -51,29 +54,31 @@ void modsLayerModify(CCNode* modsLayer) {
 					if (node->getID() == "ModItem") {
 						if (auto bg = static_cast<CCScale9Sprite*>(node->getChildByID("bg"))) {
 							if (mod->getSettingValue<bool>("transparent-lists")) {
-								if ((bg->getColor() == ccColor3B{255, 255, 255} && bg->getOpacity() == 25) || (bg->getColor() == ccColor3B{0, 0, 0} && bg->getOpacity() == 90)) { // Enabled
+								auto rgb = bg->getColor();
+								auto color = ccColor4B{rgb.b, rgb.g, rgb.b, bg->getOpacity()};
+								if (color == ccColor4B{255, 255, 255, 25} || color == ccColor4B{0, 0, 0, 90}) { // Enabled
 									bg->setOpacity(isGeodeTheme() ? 50 : 90);
 									bg->setColor(ccColor3B{0, 0, 0});
 								}
-								else if (bg->getColor() == ccColor3B{153, 245, 245} && bg->getOpacity() == 25) { // Restart Required
+								else if (color == ccColor4B{153, 245, 245, 25}) { // Restart Required
 									bg->setOpacity(90);
-									bg->setColor(ccColor3B{245, 27, 27});
+									bg->setColor(ccColor3B{123, 156, 163});
 								}
-								else if (bg->getColor() == ccColor3B{255, 255, 255} && bg->getOpacity() == 10) { // Disabled
+								else if (color == ccColor4B{255, 255, 255, 10}) { // Disabled
 									bg->setOpacity(50);
 									bg->setColor(ccColor3B{205, 205, 205});
 								}
-								else if (bg->getColor() == ccColor3B{235, 35, 112} && bg->getOpacity() == 25) { // Error
+								else if (color == ccColor4B{235, 35, 112, 25}) { // Error
 									bg->setOpacity(90);
 									bg->setColor(ccColor3B{245, 27, 27});
 								}
-								else if (bg->getColor() == ccColor3B{245, 153, 245} && bg->getOpacity() == 25) { // Outdated
+								else if (color == ccColor4B{245, 153, 245, 25}) { // Outdated
 									bg->setOpacity(90);
 								}
-								else if (bg->getColor() == ccColor3B{240, 211, 42} && bg->getOpacity() == 65) { // Featured
+								else if (color == ccColor4B{240, 211, 42, 65}) { // Featured
 									bg->setOpacity(90);
 								}
-								else if (bg->getColor() == ccColor3B{63, 91, 138} && bg->getOpacity() == 85) { // Modtober
+								else if (color == ccColor4B{63, 91, 138, 85}) { // Modtober
 									bg->setOpacity(90);
 									bg->setColor(ccColor3B{32, 102, 220});
 								}
@@ -84,6 +89,20 @@ void modsLayerModify(CCNode* modsLayer) {
 								logoSprite->setScale(logoSprite->getScale() == 0.6f ? 0.7f : 0.5f);
 							} else if (!mod->getSettingValue<bool>("larger-logos") && (logoSprite->getScale() == 0.5f || logoSprite->getScale() == 0.7f)) {
 								logoSprite->setScale(logoSprite->getScale() == 0.7f ? 0.6f : 0.4f);
+							}
+						}
+						if (auto infoContainer = node->getChildByID("info-container")) {
+							if (mod->getSettingValue<bool>("fix-mod-info-size")) {
+								auto titleContainer = infoContainer->querySelector("title-container");
+								auto developersMenu = infoContainer->querySelector("developers-menu");
+								if (titleContainer && developersMenu) {
+									infoContainer->setContentWidth(525.f);
+									infoContainer->updateLayout();
+									titleContainer->setContentWidth(525.f);
+									titleContainer->updateLayout();
+									developersMenu->setContentWidth(525.f);
+									developersMenu->updateLayout();
+								}
 							}
 						}
 					}
@@ -139,6 +158,8 @@ class $modify(CCScheduler) {
 		CCScheduler::update(dt);
 	}
 };
+
+// Imagine using geode's little ui events (they also dont work for my problems hehe)
 
 /*$execute {
 	new EventListener<EventFilter<ModItemUIEvent>>(+[](ModItemUIEvent* event) {

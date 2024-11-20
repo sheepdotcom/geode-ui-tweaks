@@ -1,5 +1,5 @@
 {
-	"geode": "4.0.0-beta.1",
+	"geode": "4.0.1",
 	"gd": {
 		"win": "2.2074",
 		"android": "2.2074",
@@ -25,6 +25,12 @@
 		"larger-logos": {
 			"name": "Larger Logos",
 			"description": "Increases the size of the logos on mod items.",
+			"type": "bool",
+			"default": false
+		},
+		"fix-mod-info-size": {
+			"name": "Fix Mod Info Size",
+			"description": "Increases the width of the info container to extend all the way to the download count.",
 			"type": "bool",
 			"default": false
 		}
