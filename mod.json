@@ -8,7 +8,7 @@
 	},
 	"id": "sheepdotcom.geode-ui-tweaks",
 	"name": "Geode UI Tweaks",
-	"version": "v0.0.1",
+	"version": "v0.1.0",
 	"developer": "sheepdotcom",
 	"description": "Tweak the Geode UI a bit more.",
 	"tags": ["customization", "interface"],
@@ -21,6 +21,15 @@
 			"description": "Makes the mod list background transparent. Best used with geode theme enabled.",
 			"type": "bool",
 			"default": false
+		},
+		"list-bg-transparency": {
+			"name": "List Background Transparency",
+			"description": "Change the transparency of the background behind the mod list.",
+			"type": "int",
+			"control": {"slider": true, "slider-step": 5, "arrows": true, "arrow-step": 5, "big-arrows": true, "big-arrow-step": 25, "input": true},
+			"default": 100,
+			"min": 0,
+			"max": 255
 		},
 		"larger-logos": {
 			"name": "Larger Logos",

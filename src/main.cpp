@@ -21,30 +21,35 @@ void modsLayerModify(CCNode* modsLayer) {
 	if (auto modListFrame = modsLayer->getChildByID("mod-list-frame")) {
 		if (auto modList = modListFrame->getChildByID("ModList")) {
 			auto searchMenu = modList->getChildByID("top-container")->getChildByID("search-menu");
-			auto searchBG = searchMenu->getChildByID("search-id");
-			auto frameBG = modListFrame->getChildByID("frame-bg");
-
-			if (!searchMenu->getChildByID("search-bg"_spr)) {
-				auto searchInput = searchMenu->getChildByID("search-input");
-				auto searchFiltersMenu = searchMenu->getChildByID("search-filters-menu");
-
-				auto someBG = CCLayerColor::create(ccColor4B{});
-				someBG->setPosition(searchMenu->getScaledContentSize() / 2);
-				someBG->ignoreAnchorPointForPosition(false);
-				someBG->setScale(0.7f);
-				someBG->setContentSize(ccp(350.f, 30.f) / someBG->getScale());
-				someBG->setColor(ccColor3B{0, 0, 0});
-				someBG->setOpacity(isGeodeTheme() ? 50 : 90);
-				someBG->setID("search-bg"_spr);
-
-				searchMenu->addChild(someBG);
+			CCLayerColor* searchBG = nullptr;
+			if (searchMenu) {
+				searchBG = static_cast<CCLayerColor*>(searchMenu->getChildByID("search-id"));
 			}
+			auto frameBG = static_cast<CCLayerColor*>(modListFrame->getChildByID("frame-bg"));
 
-			auto someBG = searchMenu->getChildByID("search-bg"_spr);
+			if (searchMenu && searchBG && frameBG) {
+				if (!searchMenu->getChildByID("search-bg"_spr)) {
+					auto searchInput = searchMenu->getChildByID("search-input");
+					auto searchFiltersMenu = searchMenu->getChildByID("search-filters-menu");
 
-			frameBG->setVisible(!mod->getSettingValue<bool>("transparent-lists"));
-			searchBG->setVisible(!mod->getSettingValue<bool>("transparent-lists"));
-			someBG->setVisible(mod->getSettingValue<bool>("transparent-lists"));
+					auto someBG = CCLayerColor::create(ccColor4B{});
+					someBG->setPosition(searchMenu->getScaledContentSize() / 2);
+					someBG->ignoreAnchorPointForPosition(false);
+					someBG->setScale(0.7f);
+					someBG->setContentSize(ccp(350.f, 30.f) / someBG->getScale());
+					someBG->setColor(ccColor3B{0, 0, 0});
+					someBG->setOpacity(isGeodeTheme() ? 50 : 90);
+					someBG->setID("search-bg"_spr);
+
+					searchMenu->addChild(someBG);
+				}
+
+				auto someBG = searchMenu->getChildByID("search-bg"_spr);
+
+				frameBG->setOpacity(mod->getSettingValue<bool>("transparent-lists") ? mod->getSettingValue<int64_t>("list-bg-transparency") : 255);
+				searchBG->setVisible(!mod->getSettingValue<bool>("transparent-lists"));
+				someBG->setVisible(mod->getSettingValue<bool>("transparent-lists"));
+			}
 
 			if (auto scrollLayer = static_cast<ScrollLayer*>(modList->getChildByID("ScrollLayer"))) {
 				CCObject* obj;
@@ -92,16 +97,20 @@ void modsLayerModify(CCNode* modsLayer) {
 							}
 						}
 						if (auto infoContainer = node->getChildByID("info-container")) {
-							if (mod->getSettingValue<bool>("fix-mod-info-size")) {
-								auto titleContainer = infoContainer->querySelector("title-container");
-								auto developersMenu = infoContainer->querySelector("developers-menu");
-								if (titleContainer && developersMenu) {
-									infoContainer->setContentWidth(525.f);
-									infoContainer->updateLayout();
-									titleContainer->setContentWidth(525.f);
-									titleContainer->updateLayout();
-									developersMenu->setContentWidth(525.f);
-									developersMenu->updateLayout();
+							if (mod->getSettingValue<bool>("fix-mod-info-size") && node->getContentHeight() != 100.f) { // me when ModList::m_display is a private member grrr
+								auto titleContainer = infoContainer->getChildByID("title-container");
+								auto developersMenu = infoContainer->getChildByID("developers-menu");
+								if (auto viewMenu = node->getChildByID("view-menu")) {
+									auto updateBtn = viewMenu->getChildByID("update-button");
+									if (titleContainer && developersMenu) {
+										auto width = updateBtn->isVisible() ? 500.f : 525.f;
+										infoContainer->setContentWidth(width);
+										infoContainer->updateLayout();
+										titleContainer->setContentWidth(width);
+										titleContainer->updateLayout();
+										developersMenu->setContentWidth(width);
+										developersMenu->updateLayout();
+									}
 								}
 							}
 						}
