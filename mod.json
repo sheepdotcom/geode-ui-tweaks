@@ -1,5 +1,5 @@
 {
-	"geode": "4.0.1",
+	"geode": "4.1.0",
 	"gd": {
 		"win": "2.2074",
 		"android": "2.2074",
@@ -8,7 +8,7 @@
 	},
 	"id": "sheepdotcom.geode-ui-tweaks",
 	"name": "Geode UI Tweaks",
-	"version": "v0.1.0",
+	"version": "v0.2.0-alpha.1",
 	"developer": "sheepdotcom",
 	"description": "Tweak the Geode UI a bit more.",
 	"tags": ["customization", "interface"],
@@ -16,9 +16,14 @@
 		"source": "https://github.com/sheepdotcom/geode-ui-tweaks"
 	},
 	"settings": {
-		"transparent-lists": {
+		"tl-title" : {
 			"name": "Transparent Lists",
 			"description": "Makes the mod list background transparent. Best used with geode theme enabled.",
+			"type": "title"
+		},
+		"transparent-lists": {
+			"name": "Enabled",
+			"description": "Enables transparent mod list background.",
 			"type": "bool",
 			"default": false
 		},
@@ -30,6 +35,65 @@
 			"default": 100,
 			"min": 0,
 			"max": 255
+		},
+		"tl-enabled-color": {
+			"name": "Enabled Color",
+			"type": "rgba",
+			"default": [0, 0, 0, 50],
+			"enable-if": "transparent-lists"
+		},
+		"tl-disabled-color": {
+			"name": "Disabled Color",
+			"type": "rgba",
+			"default": [205, 205, 205, 50],
+			"enable-if": "transparent-lists"
+		},
+		"tl-featured-color": {
+			"name": "Featured Color",
+			"type": "rgba",
+			"default": [240, 211, 42, 80],
+			"enable-if": "transparent-lists"
+		},
+		"tl-modtober-entry-color": {
+			"name": "Modtober Entry Color",
+			"type": "rgba",
+			"default": [32, 102, 220, 80],
+			"enable-if": "transparent-lists"
+		},
+		"tl-modtober-winner-color": {
+			"name": "Modtober Winner Color",
+			"type": "rgba",
+			"default": [90, 65, 150, 144],
+			"enable-if": "transparent-lists"
+		},
+		"tl-paid-color": {
+			"name": "Paid Color",
+			"type": "rgba",
+			"default": [0, 255, 63, 50],
+			"enable-if": "transparent-lists"
+		},
+		"tl-restart-required-color": {
+			"name": "Restart Required Color",
+			"type": "rgba",
+			"default": [123, 156, 163, 50],
+			"enable-if": "transparent-lists"
+		},
+		"tl-error-color": {
+			"name": "Error Color",
+			"type": "rgba",
+			"default": [245, 27, 27, 50],
+			"enable-if": "transparent-lists"
+		},
+		"tl-outdated-color": {
+			"name": "Outdated Color",
+			"type": "rgba",
+			"default": [245, 153, 245, 50],
+			"enable-if": "transparent-lists"
+		},
+		"misc-title": {
+			"name": "Miscellaneous",
+			"description": "Features that don't fit into any category.",
+			"type": "title"
 		},
 		"larger-logos": {
 			"name": "Larger Logos",
