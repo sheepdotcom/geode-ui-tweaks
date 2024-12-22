@@ -1,24 +1,105 @@
 #include "Geode/cocos/cocoa/CCObject.h"
 #include "Geode/loader/Event.hpp"
 #include "Geode/loader/Loader.hpp"
+#include "Geode/utils/web.hpp"
 #include "Geode/utils/general.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/ui/GeodeUI.hpp>
 #include <Geode/loader/SettingV3.hpp>
 #include <Geode/utils/ColorProvider.hpp>
+#include <Geode/loader/ModSettingsManager.hpp>
+#include <chrono>
 #include <cstdint>
+#include <thread>
 #include <unordered_set>
 #include <winspool.h>
+#include "picosha2.h"
 
 using namespace geode::prelude;
 
 // little notes here, i am starting to move towards commenting code instead of removing it because sometimes i need to revert back (plus i havent commited in so long while writing this because im working on the fixing the uh idk transparent lists)
+// IT IS GETTING SO UNREADABLE HELP
+
+struct ServerDateTime final {
+	using Clock = std::chrono::system_clock;
+	using Value = std::chrono::time_point<Clock>;
+
+	Value value;
+
+	std::string toAgoString() const;
+
+	static Result<ServerDateTime> parse(std::string const& str);
+};
+
+struct ServerDeveloper final {
+	std::string username;
+	std::string displayName;
+	bool isOwner;
+};
+
+struct ServerModVersion final {
+	ModMetadata metadata;
+	std::string downloadURL;
+	std::string hash;
+	size_t downloadCount;
+
+	bool operator==(ServerModVersion const&) const = default;
+
+	static Result<ServerModVersion> parse(matjson::Value const& json);
+};
+
+// Code WILL break if ServerModMetadata (or the other structs) is ever updated in geode (hopefully not anytime soon)
+struct ServerModMetadata final {
+	std::string id;
+	bool featured;
+	size_t downloadCount;
+	std::vector<ServerDeveloper> developers;
+	std::vector<ServerModVersion> versions;
+	std::unordered_set<std::string> tags;
+	std::optional<std::string> about;
+	std::optional<std::string> changelog;
+	std::optional<std::string> repository;
+	std::optional<ServerDateTime> createdAt;
+	std::optional<ServerDateTime> updatedAt;
+};
 
 CCNode* modsLayerReference = nullptr;
-std::vector<std::string> visited;
+std::vector<size_t> proxyIDList; // Idk
+std::vector<ServerModMetadata> serverModList;
+std::vector<ServerModMetadata> serverModDownloadedList; // guh
 
 bool isGeodeTheme(bool forceDisableTheme = false) {
 	return !forceDisableTheme && Loader::get()->getInstalledMod("geode.loader")->getSettingValue<bool>("enable-geode-theme");
+}
+
+std::string calculateHash(std::span<const uint8_t> data) {
+	std::vector<uint8_t> hash(picosha2::k_digest_size);
+	picosha2::hash256(data.begin(), data.end(), hash);
+	return picosha2::bytes_to_hex_string(hash.begin(), hash.end());
+}
+
+void appendServerMod(ServerModMetadata metadata) {
+	//geode::log::info("good job UwU");
+	size_t i = 0;
+	// should i be using std::find? idk i am really inconsistent with my coding
+	for (ServerModMetadata m : serverModList) {
+		if (m.id == metadata.id) {
+			serverModList[i] = metadata; // update value :3
+			return;
+		}
+		i++;
+	}
+	serverModList.push_back(metadata);
+}
+
+std::optional<ServerModMetadata> getServerMod(std::string id) {
+	for (ServerModMetadata m : serverModList) {
+		//geode::log::debug("getServerMod {} {}", m.id, id);
+		if (m.id == id) {
+			return m;
+		}
+	}
+	return std::nullopt;
 }
 
 // Average more janky solution
@@ -68,56 +149,17 @@ bool isGeodeTheme(bool forceDisableTheme = false) {
 // 	}
 // }
 
-struct ServerDateTime final {
-	using Clock = std::chrono::system_clock;
-	using Value = std::chrono::time_point<Clock>;
-
-	Value value;
-
-	std::string toAgoString() const;
-
-	static Result<ServerDateTime> parse(std::string const& str);
-};
-
-struct ServerDeveloper final {
-	std::string username;
-	std::string displayName;
-	bool isOwner;
-};
-
-struct ServerModVersion final {
-	ModMetadata metadata;
-	std::string downloadURL;
-	std::string hash;
-	size_t downloadCount;
-
-	bool operator==(ServerModVersion const&) const = default;
-
-	static Result<ServerModVersion> parse(matjson::Value const& json);
-};
-
-// Code WILL break if ServerModMetadata (or the other structs) is ever updated in geode (hopefully not anytime soon)
-struct ServerModMetadata final {
-	std::string id;
-	bool featured;
-	size_t downloadCount;
-	std::vector<ServerDeveloper> developers;
-	std::vector<ServerModVersion> versions;
-	std::unordered_set<std::string> tags;
-	std::optional<std::string> about;
-	std::optional<std::string> changelog;
-	std::optional<std::string> repository;
-	std::optional<ServerDateTime> createdAt;
-	std::optional<ServerDateTime> updatedAt;
-};
-
 // pair containing either Mod or ServerModMetadata and if bool is false then it not valid
-std::variant<Mod*, ServerModMetadata> getModFromNode(CCNode* node) {
+std::optional<std::variant<Mod*, ServerModMetadata>> getModFromNode(CCNode* node) {
 	auto something = node->getChildByID("info-container")->getChildByID("title-container")->getChildByID("title-label"); //unsure what this is for
 
 	auto addr = reinterpret_cast<uintptr_t>(node) + 0x140;
-	auto theStuff = *reinterpret_cast<std::variant<Mod*, ServerModMetadata>*>(addr); // me when pointer needed but i dereference it hehe
-	return theStuff;
+	auto theStuff = reinterpret_cast<std::variant<Mod*, ServerModMetadata>*>(addr); // me when pointer needed but i dereference it hehe
+	if (theStuff != nullptr) { // i dont think it could ever be nullptr?
+		return *theStuff;
+	}
+	geode::log::warn("Geode UI Tweaks could not find ModItem::m_source, a recent geode update could be the cause of this."); // Imagine
+	return std::nullopt;
 
 	// // sometimes mod id is found at 0x140 so we check that first (aka its probably ServerModMetadata)
 	// // note: 0x140 can be the mod id on SERVERMODMETADATA WHYYYYYYYYYYYYYYYYYYY (easy i flipped the order)
@@ -155,11 +197,23 @@ std::variant<Mod*, ServerModMetadata> getModFromNode(CCNode* node) {
 	// return std::make_pair(nullptr, false);
 }
 
+std::optional<std::variant<Mod*, ServerModMetadata>> getModFromPopup(CCNode* node) {
+	auto addr = reinterpret_cast<uintptr_t>(node) + 0x2a8;
+	auto theStuff = reinterpret_cast<std::variant<Mod*, ServerModMetadata>*>(addr);
+	if (theStuff != nullptr) {
+		return *theStuff;
+	}
+	geode::log::warn("Geode UI Tweaks could not find ModPopup::m_source, a recent geode update could be the cause of this.");
+	return std::nullopt;
+}
+
 class ModListSource {};
 
 class ModList : CCNode {};
 
 class ModItem : CCNode {};
+
+class ModPopup : CCNode {};
 
 // Soooo about the indentations, uh nullptr checking i guess? dont want game to randomly crash!
 // especially on the geode ui, very important for managing mods
@@ -226,124 +280,156 @@ void modsLayerModify(CCNode* modsLayer) {
 void modItemModify(CCNode* node) {
 	auto mod = Mod::get();
 	if (typeinfo_cast<ModItem*>(node)) {
-		//auto something = node->getChildByID("info-container")->getChildByID("title-container")->getChildByID("title-label");
-		//std::string wow = static_cast<CCLabelBMFont*>(something)->getString();
-		//if (std::find(visited.begin(), visited.end(), wow) == visited.end() || visited.size() == 0) { // for anti debug spam
-		auto nMod = getModFromNode(node);
-		//	visited.push_back(wow);
-		//}
-		std::string id;
-		std::unordered_set<std::string> tags;
-		bool isServerMod = false;
-		bool isEnabled = true;
-		bool isFeatured = false;
-		std::visit(geode::utils::makeVisitor {
-			[&](Mod* mod) {
-				id = mod->getID();
-				tags = mod->getMetadata().getTags();
-				isEnabled = mod->isEnabled();
-				//Mod doesnt store featured :(
-			},
-			[&](ServerModMetadata const& metadata) {
-				isServerMod = true;
-				id = metadata.id;
-				isServerMod = true;
-				tags = metadata.tags;
-				isFeatured = metadata.featured;
-				//geode::log::debug("id: {} tags: {} featured: {}", id, tags, isFeatured);
+		auto noMod = getModFromNode(node);
+		if (noMod.has_value()) {
+			auto nMod = noMod.value();
+			std::string id;
+			std::unordered_set<std::string> tags;
+			bool isServerMod = false;
+			bool isEnabled = true;
+			bool isFeatured = false;
+			size_t requestedAction = 0;
+			bool restartRequired = false;
+			std::visit(geode::utils::makeVisitor {
+				[&](Mod* mod) {
+					id = mod->getID();
+					tags = mod->getMetadata().getTags();
+					isEnabled = mod->isEnabled();
+					requestedAction = static_cast<size_t>(mod->getRequestedAction());
+					restartRequired = (requestedAction != 0) || (ModSettingsManager::from(mod)->restartRequired());
+					//Mod doesnt store featured :(
+				},
+				[&](ServerModMetadata const& metadata) {
+					isServerMod = true;
+					id = metadata.id;
+					tags = metadata.tags;
+					isFeatured = metadata.featured;
+					//geode::log::debug("id: {} tags: {} featured: {}", id, tags, isFeatured);
+					for (auto m : serverModDownloadedList) {
+						if (m.id == id) {
+							restartRequired = true;
+							break;
+						}
+					}
+					appendServerMod(metadata);
+				}
+			}, nMod);
+			if (auto bg = static_cast<CCScale9Sprite*>(node->getChildByID("bg"))) {
+				if (mod->getSettingValue<bool>("transparent-lists")) {
+					if (isEnabled) {
+						auto color4 = mod->getSettingValue<ccColor4B>("tl-enabled-color");
+						auto color = ccColor3B{color4.r, color4.g, color4.b};
+						bg->setColor(color);
+						bg->setOpacity(color4.a);
+					} else {
+						auto color4 = mod->getSettingValue<ccColor4B>("tl-disabled-color");
+						auto color = ccColor3B{color4.r, color4.g, color4.b};
+						bg->setColor(color);
+						bg->setOpacity(color4.a);
+					}
+					if (isFeatured && isServerMod) {
+						auto color4 = mod->getSettingValue<ccColor4B>("tl-featured-color");
+						auto color = ccColor3B{color4.r, color4.g, color4.b};
+						bg->setColor(color);
+						bg->setOpacity(color4.a);
+					}
+					if (tags.contains("paid") && isServerMod) {
+						auto color4 = mod->getSettingValue<ccColor4B>("tl-paid-color");
+						auto color = ccColor3B{color4.r, color4.g, color4.b};
+						bg->setColor(color);
+						bg->setOpacity(color4.a);
+					}
+					if (tags.contains("modtober24") && isServerMod) {
+						auto color4 = mod->getSettingValue<ccColor4B>("tl-modtober-entry-color");
+						auto color = ccColor3B{color4.r, color4.g, color4.b};
+						bg->setColor(color);
+						bg->setOpacity(color4.a);
+					}
+					if ((tags.contains("modtober24winner") || id == "rainixgd.geome3dash") && isServerMod) {
+						auto color4 = mod->getSettingValue<ccColor4B>("tl-modtober-winner-color");
+						auto color = ccColor3B{color4.r, color4.g, color4.b};
+						bg->setColor(color);
+						bg->setOpacity(color4.a);
+					}
+					if (restartRequired) { // Restart Required currently
+						auto color4 = mod->getSettingValue<ccColor4B>("tl-restart-required-color");
+						auto color = ccColor3B{color4.r, color4.g, color4.b};
+						bg->setColor(color);
+						bg->setOpacity(color4.a);
+					}
+					// auto rgb = bg->getColor();
+					// auto color = ccColor4B{rgb.b, rgb.g, rgb.b, bg->getOpacity()};
+					// if (color == ccColor4B{255, 255, 255, 25} || color == ccColor4B{0, 0, 0, 90}) { // Enabled
+					// 	bg->setOpacity(isGeodeTheme() ? 50 : 90);
+					// 	bg->setColor(ccColor3B{0, 0, 0});
+					// }
+					// else if (color == ccColor4B{153, 245, 245, 25}) { // Restart Required
+					// 	bg->setOpacity(90);
+					// 	bg->setColor(ccColor3B{123, 156, 163});
+					// }
+					// else if (color == ccColor4B{255, 255, 255, 10}) { // Disabled
+					// 	bg->setOpacity(50);
+					// 	bg->setColor(ccColor3B{205, 205, 205});
+					// }
+					// else if (color == ccColor4B{235, 35, 112, 25}) { // Error
+					// 	bg->setOpacity(90);
+					// 	bg->setColor(ccColor3B{245, 27, 27});
+					// }
+					// else if (color == ccColor4B{245, 153, 245, 25}) { // Outdated
+					// 	bg->setOpacity(90);
+					// }
+					// else if (color == ccColor4B{240, 211, 42, 65}) { // Featured
+					// 	bg->setOpacity(90);
+					// }
+					// else if (color == ccColor4B{63, 91, 138, 85}) { // Modtober
+					// 	bg->setOpacity(90);
+					// 	bg->setColor(ccColor3B{32, 102, 220});
+					// }
+				}
 			}
-		}, nMod);
-		if (auto bg = static_cast<CCScale9Sprite*>(node->getChildByID("bg"))) {
-			if (mod->getSettingValue<bool>("transparent-lists")) {
-				if (isEnabled) {
-					auto color4 = mod->getSettingValue<ccColor4B>("tl-enabled-color");
-					auto color = ccColor3B{color4.r, color4.g, color4.b};
-					bg->setColor(color);
-					bg->setOpacity(color4.a);
-				} else {
-					auto color4 = mod->getSettingValue<ccColor4B>("tl-disabled-color");
-					auto color = ccColor3B{color4.r, color4.g, color4.b};
-					bg->setColor(color);
-					bg->setOpacity(color4.a);
+			if (auto logoSprite = node->getChildByID("logo-sprite")) {
+				if (mod->getSettingValue<bool>("larger-logos") && (logoSprite->getScale() == 0.4f || logoSprite->getScale() == 0.6f)) {
+					logoSprite->setScale(logoSprite->getScale() == 0.6f ? 0.7f : 0.5f);
+				} else if (!mod->getSettingValue<bool>("larger-logos") && (logoSprite->getScale() == 0.5f || logoSprite->getScale() == 0.7f)) {
+					logoSprite->setScale(logoSprite->getScale() == 0.7f ? 0.6f : 0.4f);
 				}
-				if (isFeatured && isServerMod) {
-					auto color4 = mod->getSettingValue<ccColor4B>("tl-featured-color");
-					auto color = ccColor3B{color4.r, color4.g, color4.b};
-					bg->setColor(color);
-					bg->setOpacity(color4.a);
-				}
-				if (tags.contains("paid") && isServerMod) {
-					auto color4 = mod->getSettingValue<ccColor4B>("tl-paid-color");
-					auto color = ccColor3B{color4.r, color4.g, color4.b};
-					bg->setColor(color);
-					bg->setOpacity(color4.a);
-				}
-				if (tags.contains("modtober24") && isServerMod) {
-					auto color4 = mod->getSettingValue<ccColor4B>("tl-modtober-entry-color");
-					auto color = ccColor3B{color4.r, color4.g, color4.b};
-					bg->setColor(color);
-					bg->setOpacity(color4.a);
-				}
-				if ((tags.contains("modtober24winner") || id == "rainixgd.geome3dash") && isServerMod) {
-					auto color4 = mod->getSettingValue<ccColor4B>("tl-modtober-winner-color");
-					auto color = ccColor3B{color4.r, color4.g, color4.b};
-					bg->setColor(color);
-					bg->setOpacity(color4.a);
-				}
-				// auto rgb = bg->getColor();
-				// auto color = ccColor4B{rgb.b, rgb.g, rgb.b, bg->getOpacity()};
-				// if (color == ccColor4B{255, 255, 255, 25} || color == ccColor4B{0, 0, 0, 90}) { // Enabled
-				// 	bg->setOpacity(isGeodeTheme() ? 50 : 90);
-				// 	bg->setColor(ccColor3B{0, 0, 0});
-				// }
-				// else if (color == ccColor4B{153, 245, 245, 25}) { // Restart Required
-				// 	bg->setOpacity(90);
-				// 	bg->setColor(ccColor3B{123, 156, 163});
-				// }
-				// else if (color == ccColor4B{255, 255, 255, 10}) { // Disabled
-				// 	bg->setOpacity(50);
-				// 	bg->setColor(ccColor3B{205, 205, 205});
-				// }
-				// else if (color == ccColor4B{235, 35, 112, 25}) { // Error
-				// 	bg->setOpacity(90);
-				// 	bg->setColor(ccColor3B{245, 27, 27});
-				// }
-				// else if (color == ccColor4B{245, 153, 245, 25}) { // Outdated
-				// 	bg->setOpacity(90);
-				// }
-				// else if (color == ccColor4B{240, 211, 42, 65}) { // Featured
-				// 	bg->setOpacity(90);
-				// }
-				// else if (color == ccColor4B{63, 91, 138, 85}) { // Modtober
-				// 	bg->setOpacity(90);
-				// 	bg->setColor(ccColor3B{32, 102, 220});
-				// }
 			}
-		}
-		if (auto logoSprite = node->getChildByID("logo-sprite")) {
-			if (mod->getSettingValue<bool>("larger-logos") && (logoSprite->getScale() == 0.4f || logoSprite->getScale() == 0.6f)) {
-				logoSprite->setScale(logoSprite->getScale() == 0.6f ? 0.7f : 0.5f);
-			} else if (!mod->getSettingValue<bool>("larger-logos") && (logoSprite->getScale() == 0.5f || logoSprite->getScale() == 0.7f)) {
-				logoSprite->setScale(logoSprite->getScale() == 0.7f ? 0.6f : 0.4f);
-			}
-		}
-		if (auto infoContainer = node->getChildByID("info-container")) {
-			if (mod->getSettingValue<bool>("fix-mod-info-size") && node->getContentHeight() != 100.f) { // me when ModList::m_display is a private member grrr
-				auto titleContainer = infoContainer->getChildByID("title-container");
-				auto developersMenu = infoContainer->getChildByID("developers-menu");
-				if (auto viewMenu = node->getChildByID("view-menu")) {
-					auto updateBtn = viewMenu->getChildByID("update-button");
-					if (titleContainer && developersMenu) {
-						auto width = updateBtn->isVisible() ? 500.f : 525.f;
-						infoContainer->setContentWidth(width);
-						infoContainer->updateLayout();
-						titleContainer->setContentWidth(width);
-						titleContainer->updateLayout();
-						developersMenu->setContentWidth(width);
-						developersMenu->updateLayout();
+			if (auto infoContainer = node->getChildByID("info-container")) {
+				if (mod->getSettingValue<bool>("fix-mod-info-size") && node->getContentHeight() != 100.f) { // me when ModList::m_display is a private member grrr
+					auto titleContainer = infoContainer->getChildByID("title-container");
+					auto developersMenu = infoContainer->getChildByID("developers-menu");
+					if (auto viewMenu = node->getChildByID("view-menu")) {
+						auto updateBtn = viewMenu->getChildByID("update-button");
+						if (titleContainer && developersMenu) {
+							auto width = updateBtn->isVisible() ? 500.f : 525.f;
+							infoContainer->setContentWidth(width);
+							infoContainer->updateLayout();
+							titleContainer->setContentWidth(width);
+							titleContainer->updateLayout();
+							developersMenu->setContentWidth(width);
+							developersMenu->updateLayout();
+						}
 					}
 				}
 			}
+		}
+	}
+}
+
+void modPopupModify(CCNode* popup) {
+	auto mod = Mod::get();
+	if (typeinfo_cast<ModPopup*>(popup)) {
+		auto noMod = getModFromPopup(popup);
+		if (noMod.has_value()) {
+			auto nMod = noMod.value();
+			std::visit(geode::utils::makeVisitor {
+				[&](Mod* mod) {
+
+				},
+				[&](ServerModMetadata const& metadata) {
+					appendServerMod(metadata);
+				}
+			}, nMod);
 		}
 	}
 }
@@ -402,22 +488,137 @@ class $modify(CCScheduler) {
 	}
 };
 
+void modDownloadChecker(web::WebResponse* response, std::string id, std::string url) {
+	auto oServerMod = getServerMod(id);
+	//geode::log::debug("I PROBABLY BROKE SOMETHING {}", oServerMod.has_value());
+	if (oServerMod.has_value()) {
+		auto serverMod = oServerMod.value();
+		std::optional<ServerModVersion> oVersion = std::nullopt; // im in love with std::optional
+		for (ServerModVersion v : serverMod.versions) {
+			//geode::log::debug("version test lol {} {}", v.downloadURL, url);
+			if (v.downloadURL == url) {
+				oVersion = v;
+			}
+		}
+		if (response->ok() && oVersion.has_value()) {
+			auto version = oVersion.value();
+			// my recreation of m_downloadListener.bind in DownloadManager::confirm
+			if (auto actualHash = calculateHash(response->data()); actualHash != version.hash) {
+				//geode::log::info("INVALID HASH");
+				// invalid hash!
+				return;
+			}
+			// there is something for if it cant delete existing .geode package but we only care about installing not updating plus there is no solution besides overwriting (guh)
+			// also this is stupid lol but idk im not writing anything!
+			auto dir = dirs::getModsDir() / (id + ".geode");
+			std::ofstream file;
+#ifdef GEODE_IS_WINDOWS
+			file.open(dir.wstring(), std::ios::out | std::ios::binary);
+#else
+			file.open(dir.string(), std::ios::out | std::ios::binary);
+#endif
+			if (!file.is_open()) {
+				//geode::log::info("UNABLE TO WRITE GEODE FILE");
+				// oops it cant write!
+				return;
+			}
+			file.close(); // am i writing too many comments?
+			serverModDownloadedList.push_back(serverMod);
+		}
+	}
+}
+
+//https://api.geode-sdk.org/v1/mods/{id}/versions/{version}/download
+
+// using GDIntercept code so i can hook onto a SINGLE request omg
+web::WebTask GeodeWebHook(web::WebRequest* request, std::string_view method, std::string_view url) {
+	if (std::find(proxyIDList.begin(), proxyIDList.end(), request->getID()) == proxyIDList.end()) { // anti proxy thingie (no duplicates i guess?)
+		proxyIDList.push_back(request->getID());
+		bool isDownload = false;
+		std::string modID;
+		std::string sURL = std::string(url);
+		//geode::log::debug("{}", std::string(url));
+		std::string apiURL = "https://api.geode-sdk.org/v1/mods/";
+		// when you dont use regex
+		if (sURL.starts_with(apiURL)) {
+			//geode::log::debug("geode idk");
+			std::string nURL = sURL.substr(apiURL.size());
+			//geode::log::debug("{}", nURL);
+			size_t slash1 = nURL.find("/");
+			if (slash1 != std::string::npos) {
+				modID = nURL.substr(0, slash1);
+				//geode::log::debug("wha {}", modID);
+				nURL = nURL.substr(slash1); // hmm
+				//geode::log::debug("insane {}", nURL);
+				std::string vURL = "/versions/";
+				if (nURL.starts_with(vURL)) {
+					//geode::log::debug("INCORRECT!!!");
+					nURL = nURL.substr(vURL.size());
+					//geode::log::debug("new {}", nURL);
+					size_t slash2 = nURL.find("/");
+					if (slash2 != std::string::npos) {
+						std::string version = nURL.substr(0, slash2);
+						//geode::log::debug("ver {}", version);
+						if (nURL.ends_with("/download")) {
+							//geode::log::debug("is download no way");
+							isDownload = true;
+						}
+					}
+				}
+			}
+		}
+		if (isDownload && !Loader::get()->isModInstalled(modID)) {
+			//geode::log::debug("hooking download hehehe");
+			// this looks so much less complicated than in GDIntercept
+			auto task = web::WebTask::run([request, method, url, modID, sURL](auto progress, auto cancelled) -> web::WebTask::Result {
+				web::WebResponse* response = nullptr;
+
+				web::WebTask task = request->send(method, url);
+
+				task.listen([&response](const web::WebResponse* taskResponse) {
+					response = new web::WebResponse(*taskResponse);
+				}, [progress, cancelled](const web::WebProgress* taskProgress) {
+					if (!cancelled()) progress(*taskProgress);
+				});
+
+				while (!response && !cancelled()) std::this_thread::sleep_for(std::chrono::milliseconds(2)); // rest
+
+				if (cancelled()) {
+					task.cancel();
+
+					return web::WebTask::Cancel();
+				} else {
+					//geode::log::debug("response gotten yay!");
+
+					modDownloadChecker(response, modID, sURL);
+
+					return *response;
+				}
+			}, fmt::format("Proxy for {} {}", method, url));
+			return task;
+		}
+	}
+	return request->send(method, url);
+}
+
 // Imagine using geode's little ui events (they also dont work for my problems hehe)
 // Haha they actually work now time to remove that very stupid CCScheduler::update hook
 
 $execute {
+	// GDIntercept
+	(void) Mod::get()->hook(
+		reinterpret_cast<void*>(addresser::getNonVirtual(&web::WebRequest::send)),
+		&GeodeWebHook,
+		"geode::web::WebRequest::send",
+		tulip::hook::TulipConvention::Thiscall
+	);
+
 	new EventListener<EventFilter<ModItemUIEvent>>(+[](ModItemUIEvent* event) {
 		modItemModify(event->getItem());
 		return ListenerResult::Propagate;
 	});
-	new EventListener<EventFilter<ModLogoUIEvent>>(+[](ModLogoUIEvent* event) {
-		auto logo = event->getSprite();
-		queueInMainThread([logo] {
-			auto mod = Mod::get();
-			if (mod->getSettingValue<bool>("larger-logos")) {
-				logo->setScale(0.5f);
-			}
-		});
+	new EventListener<EventFilter<ModPopupUIEvent>>(+[](ModPopupUIEvent* event) {
+		modPopupModify(event->getPopup());
 		return ListenerResult::Propagate;
 	});
 }
