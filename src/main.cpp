@@ -12,7 +12,6 @@
 #include <cstdint>
 #include <thread>
 #include <unordered_set>
-#include <winspool.h>
 #include "picosha2.h"
 
 using namespace geode::prelude;
