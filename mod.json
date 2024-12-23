@@ -34,61 +34,72 @@
 			"control": {"slider": true, "slider-step": 5, "arrows": true, "arrow-step": 5, "big-arrows": true, "big-arrow-step": 25, "input": true},
 			"default": 100,
 			"min": 0,
-			"max": 255
+			"max": 255,
+			"enable-if": "transparent-lists",
+			"enable-if-description": "Enable transparent lists"
 		},
 		"tl-enabled-color": {
 			"name": "Enabled Color",
 			"type": "rgba",
 			"default": [0, 0, 0, 50],
-			"enable-if": "transparent-lists"
+			"enable-if": "transparent-lists",
+			"enable-if-description": "Enable transparent lists"
 		},
 		"tl-disabled-color": {
 			"name": "Disabled Color",
 			"type": "rgba",
 			"default": [205, 205, 205, 50],
-			"enable-if": "transparent-lists"
+			"enable-if": "transparent-lists",
+			"enable-if-description": "Enable transparent lists"
 		},
 		"tl-featured-color": {
 			"name": "Featured Color",
 			"type": "rgba",
 			"default": [240, 211, 42, 80],
-			"enable-if": "transparent-lists"
+			"enable-if": "transparent-lists",
+			"enable-if-description": "Enable transparent lists"
 		},
 		"tl-modtober-entry-color": {
 			"name": "Modtober Entry Color",
 			"type": "rgba",
 			"default": [32, 102, 220, 80],
-			"enable-if": "transparent-lists"
+			"enable-if": "transparent-lists",
+			"enable-if-description": "Enable transparent lists"
 		},
 		"tl-modtober-winner-color": {
 			"name": "Modtober Winner Color",
 			"type": "rgba",
 			"default": [90, 65, 150, 144],
-			"enable-if": "transparent-lists"
+			"enable-if": "transparent-lists",
+			"enable-if-description": "Enable transparent lists"
 		},
 		"tl-paid-color": {
 			"name": "Paid Color",
 			"type": "rgba",
 			"default": [0, 255, 63, 80],
-			"enable-if": "transparent-lists"
+			"enable-if": "transparent-lists",
+			"enable-if-description": "Enable transparent lists"
 		},
 		"tl-restart-required-color": {
 			"name": "Restart Required Color",
 			"type": "rgba",
 			"default": [123, 156, 163, 80],
-			"enable-if": "transparent-lists"
+			"enable-if": "transparent-lists",
+			"enable-if-description": "Enable transparent lists"
 		},
 		"tl-error-color": {
 			"name": "Error Color",
 			"type": "rgba",
 			"default": [245, 27, 27, 80],
-			"enable-if": "transparent-lists"
+			"enable-if": "transparent-lists",
+			"enable-if-description": "Enable transparent lists"
 		},
 		"tl-outdated-color": {
 			"name": "Outdated Color",
 			"type": "rgba",
 			"default": [245, 153, 245, 80],
-			"enable-if": "transparent-lists"
+			"enable-if": "transparent-lists",
+			"enable-if-description": "Enable transparent lists"
 		},
 		"misc-title": {
 			"name": "Miscellaneous",
@@ -104,6 +115,11 @@
 		"fix-mod-info-size": {
 			"name": "Fix Mod Info Size",
 			"description": "Increases the width of the info container to extend all the way to the download count.",
+			"type": "bool",
+			"default": false
+		},
+		"dont-shorten-download-count": {
+			"name": "Don't Shorten Download Count",
 			"type": "bool",
 			"default": false
 		}

@@ -20,4 +20,11 @@ endif()
 
 add_subdirectory($ENV{GEODE_SDK} ${CMAKE_CURRENT_BINARY_DIR}/geode)
 
+CPMAddPackage("gh:HowardHinnant/date#1ead671")
+
+target_link_libraries(${PROJECT_NAME} date)
+
+# looks like i found a use for this (ModMetadata)
+target_compile_definitions(geode-sdk INTERFACE GEODE_EXPOSE_SECRET_INTERNALS_IN_HEADERS_DO_NOT_DEFINE_PLEASE)
+
 setup_geode_mod(${PROJECT_NAME})

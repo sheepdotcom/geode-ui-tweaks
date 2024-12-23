@@ -9,58 +9,17 @@
 #include <Geode/utils/ColorProvider.hpp>
 #include <Geode/loader/ModSettingsManager.hpp>
 #include <chrono>
+#include <date/date.h>
 #include <cstdint>
 #include <thread>
 #include <unordered_set>
 #include "picosha2.h"
+#include "Server.hpp"
 
 using namespace geode::prelude;
 
 // little notes here, i am starting to move towards commenting code instead of removing it because sometimes i need to revert back (plus i havent commited in so long while writing this because im working on the fixing the uh idk transparent lists)
 // IT IS GETTING SO UNREADABLE HELP
-
-struct ServerDateTime final {
-	using Clock = std::chrono::system_clock;
-	using Value = std::chrono::time_point<Clock>;
-
-	Value value;
-
-	std::string toAgoString() const;
-
-	static Result<ServerDateTime> parse(std::string const& str);
-};
-
-struct ServerDeveloper final {
-	std::string username;
-	std::string displayName;
-	bool isOwner;
-};
-
-struct ServerModVersion final {
-	ModMetadata metadata;
-	std::string downloadURL;
-	std::string hash;
-	size_t downloadCount;
-
-	bool operator==(ServerModVersion const&) const = default;
-
-	static Result<ServerModVersion> parse(matjson::Value const& json);
-};
-
-// Code WILL break if ServerModMetadata (or the other structs) is ever updated in geode (hopefully not anytime soon)
-struct ServerModMetadata final {
-	std::string id;
-	bool featured;
-	size_t downloadCount;
-	std::vector<ServerDeveloper> developers;
-	std::vector<ServerModVersion> versions;
-	std::unordered_set<std::string> tags;
-	std::optional<std::string> about;
-	std::optional<std::string> changelog;
-	std::optional<std::string> repository;
-	std::optional<ServerDateTime> createdAt;
-	std::optional<ServerDateTime> updatedAt;
-};
 
 CCNode* modsLayerReference = nullptr;
 std::vector<size_t> proxyIDList; // Idk
@@ -100,6 +59,19 @@ std::optional<ServerModMetadata> getServerMod(std::string id) {
 	}
 	return std::nullopt;
 }
+
+class comma_numpunct : public std::numpunct<char> {
+protected:
+	virtual char do_thousands_sep() const
+	{
+		return ',';
+	}
+
+	virtual std::string do_grouping() const
+	{
+		return "\03";
+	}
+};
 
 // Average more janky solution
 
@@ -152,6 +124,8 @@ std::optional<ServerModMetadata> getServerMod(std::string id) {
 std::optional<std::variant<Mod*, ServerModMetadata>> getModFromNode(CCNode* node) {
 	auto something = node->getChildByID("info-container")->getChildByID("title-container")->getChildByID("title-label"); //unsure what this is for
 
+	// this might be the only thing keeping this off the index lol since it'll crash if it points to the wrong type and I can't use try catch because android grr
+	// though hopefully they NEVER add any members before m_source
 	auto addr = reinterpret_cast<uintptr_t>(node) + 0x140;
 	auto theStuff = reinterpret_cast<std::variant<Mod*, ServerModMetadata>*>(addr); // me when pointer needed but i dereference it hehe
 	if (theStuff != nullptr) { // i dont think it could ever be nullptr?
@@ -218,7 +192,7 @@ class ModPopup : CCNode {};
 // especially on the geode ui, very important for managing mods
 // Also getting certain things might be wierd but like i dont wanna make hacky way around a private class and private members
 
-// This gonna be re-done in a less jank way. (No more changing colors based on mod item color because i found out getModSource exists)
+// This ~~gonna be~~ is re-done in a less jank way. (No more changing colors based on mod item color because i found out getModSource exists)
 // OMG IS THIS A MESS
 void modsLayerModify(CCNode* modsLayer) {
 	auto mod = Mod::get();
@@ -287,15 +261,16 @@ void modItemModify(CCNode* node) {
 			bool isServerMod = false;
 			bool isEnabled = true;
 			bool isFeatured = false;
+			size_t downloadCount = 0;
 			size_t requestedAction = 0;
 			bool restartRequired = false;
 			std::visit(geode::utils::makeVisitor {
-				[&](Mod* mod) {
-					id = mod->getID();
-					tags = mod->getMetadata().getTags();
-					isEnabled = mod->isEnabled();
-					requestedAction = static_cast<size_t>(mod->getRequestedAction());
-					restartRequired = (requestedAction != 0) || (ModSettingsManager::from(mod)->restartRequired());
+				[&](Mod* dMod) {
+					id = dMod->getID();
+					tags = dMod->getMetadata().getTags();
+					isEnabled = dMod->isEnabled();
+					requestedAction = static_cast<size_t>(dMod->getRequestedAction());
+					restartRequired = (requestedAction != 0) || (ModSettingsManager::from(dMod)->restartRequired());
 					//Mod doesnt store featured :(
 				},
 				[&](ServerModMetadata const& metadata) {
@@ -303,6 +278,7 @@ void modItemModify(CCNode* node) {
 					id = metadata.id;
 					tags = metadata.tags;
 					isFeatured = metadata.featured;
+					downloadCount = metadata.downloadCount;
 					//geode::log::debug("id: {} tags: {} featured: {}", id, tags, isFeatured);
 					for (auto m : serverModDownloadedList) {
 						if (m.id == id) {
@@ -313,7 +289,28 @@ void modItemModify(CCNode* node) {
 					appendServerMod(metadata);
 				}
 			}, nMod);
-			if (auto bg = static_cast<CCScale9Sprite*>(node->getChildByID("bg"))) {
+			static std::locale commaLocale(std::locale(), new comma_numpunct());
+			auto bg = static_cast<CCScale9Sprite*>(node->getChildByID("bg"));
+			auto logoSprite = node->getChildByID("logo-sprite");
+			auto infoContainer = node->getChildByID("info-container");
+			CCNode* titleContainer;
+			CCMenu* developersMenu;
+			if (infoContainer) {
+				titleContainer = infoContainer->getChildByID("title-container");
+				developersMenu = static_cast<CCMenu*>(infoContainer->getChildByID("developers-menu"));
+			}
+			auto viewMenu = static_cast<CCMenu*>(node->getChildByID("view-menu"));
+			CCNode* downloadCountContainer;
+			CCLabelBMFont* downloadsLabel;
+			CCSprite* downloadsIcon;
+			if (viewMenu) {
+				downloadsLabel = static_cast<CCLabelBMFont*>(viewMenu->getChildByIDRecursive("downloads-label"));
+				downloadsIcon = static_cast<CCSprite*>(viewMenu->getChildByIDRecursive("downloads-icon-sprite"));
+				if (downloadsLabel) {
+					downloadCountContainer = downloadsLabel->getParent();
+				}
+			}
+			if (bg) {
 				if (mod->getSettingValue<bool>("transparent-lists")) {
 					if (isEnabled) {
 						auto color4 = mod->getSettingValue<ccColor4B>("tl-enabled-color");
@@ -386,21 +383,36 @@ void modItemModify(CCNode* node) {
 					// }
 				}
 			}
-			if (auto logoSprite = node->getChildByID("logo-sprite")) {
+			if (logoSprite) {
 				if (mod->getSettingValue<bool>("larger-logos") && (logoSprite->getScale() == 0.4f || logoSprite->getScale() == 0.6f)) {
 					logoSprite->setScale(logoSprite->getScale() == 0.6f ? 0.7f : 0.5f);
 				} else if (!mod->getSettingValue<bool>("larger-logos") && (logoSprite->getScale() == 0.5f || logoSprite->getScale() == 0.7f)) {
 					logoSprite->setScale(logoSprite->getScale() == 0.7f ? 0.6f : 0.4f);
 				}
 			}
-			if (auto infoContainer = node->getChildByID("info-container")) {
-				if (mod->getSettingValue<bool>("fix-mod-info-size") && node->getContentHeight() != 100.f) { // me when ModList::m_display is a private member grrr
-					auto titleContainer = infoContainer->getChildByID("title-container");
-					auto developersMenu = infoContainer->getChildByID("developers-menu");
-					if (auto viewMenu = node->getChildByID("view-menu")) {
+			if (viewMenu) {
+				if (downloadsLabel && downloadsIcon && downloadCountContainer) {
+					if (mod->getSettingValue<bool>("dont-shorten-download-count")) {
+						if (isServerMod) {
+							downloadsLabel->setString(fmt::format(commaLocale, "{:L}", downloadCount).c_str());
+							downloadCountContainer->setContentSize({downloadsLabel->getScaledContentWidth() + downloadsIcon->getScaledContentWidth(), 30});
+							downloadCountContainer->updateLayout();
+						}
+					}
+				}
+			}
+			if (infoContainer) {
+				if (mod->getSettingValue<bool>("fix-mod-info-size") && node->getContentHeight() != 100.f) { // me when ModList::m_display is a private member grrr (now i do have bypasses but seeing as this can change uh idk)
+					if (viewMenu) {
 						auto updateBtn = viewMenu->getChildByID("update-button");
 						if (titleContainer && developersMenu) {
 							auto width = updateBtn->isVisible() ? 500.f : 525.f;
+							if (isServerMod && downloadCountContainer) {
+								auto leftPos = infoContainer->getPosition();
+								auto viewMenuLeft = viewMenu->getPosition() - viewMenu->getScaledContentWidth();
+								auto rightPos = (downloadCountContainer->getPosition() * viewMenu->getScale()) + viewMenuLeft;
+								width = (std::abs(rightPos.x - leftPos.x) / infoContainer->getScaleX()) - 15.f;
+							}
 							infoContainer->setContentWidth(width);
 							infoContainer->updateLayout();
 							titleContainer->setContentWidth(width);
@@ -529,7 +541,7 @@ void modDownloadChecker(web::WebResponse* response, std::string id, std::string 
 
 //https://api.geode-sdk.org/v1/mods/{id}/versions/{version}/download
 
-// using GDIntercept code so i can hook onto a SINGLE request omg
+// using GDIntercept code (kinda) so i can hook onto a SINGLE request omg (maybe more later idk)
 web::WebTask GeodeWebHook(web::WebRequest* request, std::string_view method, std::string_view url) {
 	if (std::find(proxyIDList.begin(), proxyIDList.end(), request->getID()) == proxyIDList.end()) { // anti proxy thingie (no duplicates i guess?)
 		proxyIDList.push_back(request->getID());
