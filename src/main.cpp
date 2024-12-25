@@ -315,6 +315,8 @@ void modItemModify(CCNode* node) {
 			size_t downloadCount = 0;
 			size_t requestedAction = 0;
 			bool restartRequired = false;
+			std::optional<LoadProblem> targetsOutdated;
+			bool hasLoadProblems;
 			std::optional<ServerModUpdate> availableUpdate = getModUpdateFromNode(node);
 			if (availableUpdate.has_value()) {
 				appendServerModUpdate(availableUpdate.value());
@@ -327,6 +329,8 @@ void modItemModify(CCNode* node) {
 					tags = dMod->getMetadata().getTags();
 					isEnabled = dMod->isEnabled();
 					//Mod doesnt store featured :(
+					targetsOutdated = dMod->targetsOutdatedVersion();
+					hasLoadProblems = dMod->hasLoadProblems();
 				},
 				[&](ServerModMetadata const& metadata) {
 					isServerMod = true;
@@ -342,7 +346,7 @@ void modItemModify(CCNode* node) {
 				requestedAction = static_cast<size_t>(lMod->getRequestedAction());
 				restartRequired = (requestedAction != 0) || (ModSettingsManager::from(lMod)->restartRequired());
 			}
-			geode::log::debug("nya_uwugayreal {} {} {}", id, requestedAction, restartRequired);
+			//geode::log::debug("nya_uwugayreal {} {} {}", id, requestedAction, restartRequired);
 			for (auto m : serverModDownloadsList) {
 				//geode::log::debug("huuuh");
 				std::visit(geode::utils::makeVisitor {
@@ -397,54 +401,38 @@ void modItemModify(CCNode* node) {
 			}
 			if (bg) {
 				if (mod->getSettingValue<bool>("transparent-lists")) {
-					if (isEnabled) {
-						auto color4 = mod->getSettingValue<ccColor4B>("tl-enabled-color");
-						auto color = ccColor3B{color4.r, color4.g, color4.b};
-						bg->setColor(color);
-						bg->setOpacity(color4.a);
-					} else {
-						auto color4 = mod->getSettingValue<ccColor4B>("tl-disabled-color");
-						auto color = ccColor3B{color4.r, color4.g, color4.b};
-						bg->setColor(color);
-						bg->setOpacity(color4.a);
+					auto color4 = mod->getSettingValue<ccColor4B>("tl-enabled-color");
+					if (!isEnabled) {
+						color4 = mod->getSettingValue<ccColor4B>("tl-disabled-color");
 					}
 					if (isFeatured && isServerMod) {
-						auto color4 = mod->getSettingValue<ccColor4B>("tl-featured-color");
-						auto color = ccColor3B{color4.r, color4.g, color4.b};
-						bg->setColor(color);
-						bg->setOpacity(color4.a);
+						color4 = mod->getSettingValue<ccColor4B>("tl-featured-color");
 					}
 					if (tags.contains("paid") && isServerMod) {
-						auto color4 = mod->getSettingValue<ccColor4B>("tl-paid-color");
-						auto color = ccColor3B{color4.r, color4.g, color4.b};
-						bg->setColor(color);
-						bg->setOpacity(color4.a);
+						color4 = mod->getSettingValue<ccColor4B>("tl-paid-color");
 					}
 					if (tags.contains("modtober24") && isServerMod) {
-						auto color4 = mod->getSettingValue<ccColor4B>("tl-modtober-entry-color");
-						auto color = ccColor3B{color4.r, color4.g, color4.b};
-						bg->setColor(color);
-						bg->setOpacity(color4.a);
+						color4 = mod->getSettingValue<ccColor4B>("tl-modtober-entry-color");
 					}
 					if ((tags.contains("modtober24winner") || id == "rainixgd.geome3dash") && isServerMod) {
-						auto color4 = mod->getSettingValue<ccColor4B>("tl-modtober-winner-color");
-						auto color = ccColor3B{color4.r, color4.g, color4.b};
-						bg->setColor(color);
-						bg->setOpacity(color4.a);
+						color4 = mod->getSettingValue<ccColor4B>("tl-modtober-winner-color");
 					}
 					//geode::log::debug("is {} has {}", isDownloading, hasDownloaded);
 					if (availableUpdate && !(isDownloading || hasDownloaded)) {
-						auto color4 = mod->getSettingValue<ccColor4B>("tl-updates-available-color");
-						auto color = ccColor3B{color4.r, color4.g, color4.b};
-						bg->setColor(color);
-						bg->setOpacity(color4.a);
+						color4 = mod->getSettingValue<ccColor4B>("tl-updates-available-color");
+					}
+					if (!isServerMod && hasLoadProblems) {
+						color4 = mod->getSettingValue<ccColor4B>("tl-error-color");
+					}
+					if (!restartRequired && targetsOutdated && !isDownloading) {
+						color4 = mod->getSettingValue<ccColor4B>("tl-outdated-color");
 					}
 					if (restartRequired) { // Restart Required currently
-						auto color4 = mod->getSettingValue<ccColor4B>("tl-restart-required-color");
-						auto color = ccColor3B{color4.r, color4.g, color4.b};
-						bg->setColor(color);
-						bg->setOpacity(color4.a);
+						color4 = mod->getSettingValue<ccColor4B>("tl-restart-required-color");
 					}
+					auto color = ccColor3B{color4.r, color4.g, color4.b};
+					bg->setColor(color);
+					bg->setOpacity(color4.a);
 					// auto rgb = bg->getColor();
 					// auto color = ccColor4B{rgb.b, rgb.g, rgb.b, bg->getOpacity()};
 					// if (color == ccColor4B{255, 255, 255, 25} || color == ccColor4B{0, 0, 0, 90}) { // Enabled
