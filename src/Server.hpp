@@ -1,5 +1,8 @@
+#pragma once
+
 #include "Geode/platform/cplatform.h"
 #include "Geode/utils/JsonValidation.hpp"
+#include "Geode/utils/web.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/DefaultInclude.hpp>
 #include <matjson.hpp>
@@ -418,3 +421,65 @@ struct ServerModMetadata final {
 };
 
 // More can go down here idk i dont wanna bloat this
+struct DownloadStatusFetching {
+    uint8_t percentage;
+    bool operator==(DownloadStatusFetching const&) const = default;
+};
+struct DownloadStatusConfirm {
+    ServerModVersion version;
+    bool operator==(DownloadStatusConfirm const&) const = default;
+};
+struct DownloadStatusDownloading {
+    uint8_t percentage;
+    bool operator==(DownloadStatusDownloading const&) const = default;
+};
+struct DownloadStatusDone {
+    ServerModVersion version;
+    bool operator==(DownloadStatusDone const&) const = default;
+};
+struct DownloadStatusError {
+    std::string details;
+    bool operator==(DownloadStatusError const&) const = default;
+};
+struct DownloadStatusCancelled {
+    bool operator==(DownloadStatusCancelled const&) const = default;
+};
+
+using DownloadStatus = std::variant<DownloadStatusFetching, DownloadStatusConfirm, DownloadStatusDownloading, DownloadStatusDone, DownloadStatusError, DownloadStatusCancelled>;
+
+struct ServerError final {
+    int code;
+    std::string details;
+
+    ServerError() = default;
+
+    template <class... Args>
+    ServerError(int code, fmt::string_view format, Args&&... args) : code(code), details(fmt::vformat(format, fmt::make_format_args(args...))) {}
+};
+
+static const char* jsonTypeToString(matjson::Type const& type) {
+    switch (type) {
+        case matjson::Type::Object: return "object";
+        case matjson::Type::Array: return "array";
+        case matjson::Type::Bool: return "boolean";
+        case matjson::Type::Number: return "number";
+        case matjson::Type::String: return "string";
+        case matjson::Type::Null: return "null";
+        default: return "unknown";
+    }
+}
+
+static Result<matjson::Value, ServerError> parseServerPayload(web::WebResponse const& response) {
+    auto asJson = response.json();
+    if (!asJson) {
+        return Err(ServerError(response.code(), "Response was not valid JSON: {}", asJson.unwrapErr()));
+    }
+    auto json = std::move(asJson).unwrap();
+    if (!json.isObject()) {
+        return Err(ServerError(response.code(), "Expected object, got {}", jsonTypeToString(json.type())));
+    }
+    if (!json.contains("payload")) {
+        return Err(ServerError(response.code(), "Object does not contain \"payload\" key - got {}", json.dump()));
+    }
+    return Ok(json["payload"]);
+}

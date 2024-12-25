@@ -52,6 +52,13 @@
 			"enable-if": "transparent-lists",
 			"enable-if-description": "Enable transparent lists"
 		},
+		"tl-updates-available-color": {
+			"name": "Updates Available Color",
+			"type": "rgba",
+			"default": [88, 202, 255, 80],
+			"enable-if": "transparent-lists",
+			"enable-if-description": "Enable transparent lists"
+		},
 		"tl-featured-color": {
 			"name": "Featured Color",
 			"type": "rgba",

@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <thread>
 #include <unordered_set>
+#include <variant>
 #include "picosha2.h"
 #include "Server.hpp"
 
@@ -24,7 +25,10 @@ using namespace geode::prelude;
 CCNode* modsLayerReference = nullptr;
 std::vector<size_t> proxyIDList; // Idk
 std::vector<ServerModMetadata> serverModList;
-std::vector<ServerModMetadata> serverModDownloadedList; // guh
+std::vector<ServerModUpdate> serverModUpdateList;
+std::vector<std::pair<std::string, ServerModVersion>> serverModVersionList; // oh god they keep appearing
+//std::map<ServerModMetadata, DownloadStatus> serverModDownloadsList; // guh (this one wont build)
+std::vector<std::pair<std::variant<Mod*, ServerModMetadata>, DownloadStatus>> serverModDownloadsList; // guh x2 (this builds but not map or unordered_map wtf)
 
 bool isGeodeTheme(bool forceDisableTheme = false) {
 	return !forceDisableTheme && Loader::get()->getInstalledMod("geode.loader")->getSettingValue<bool>("enable-geode-theme");
@@ -58,6 +62,43 @@ std::optional<ServerModMetadata> getServerMod(std::string id) {
 		}
 	}
 	return std::nullopt;
+}
+
+void appendServerModUpdate(ServerModUpdate update) {
+	size_t i = 0;
+	for (auto m : serverModUpdateList) {
+		if (m.id == update.id) {
+			serverModUpdateList[i] = update;
+			return;
+		}
+		i++;
+	}
+	serverModUpdateList.push_back(update);
+}
+
+void appendServerModVersion(std::string id, ServerModVersion version) {
+	size_t i = 0;
+	for (auto m : serverModVersionList) {
+		if (m.second.downloadURL == version.downloadURL) {
+			serverModVersionList[i] = std::make_pair(id, version);
+			return;
+		}
+		i++;
+	}
+	serverModVersionList.push_back(std::make_pair(id, version));
+}
+
+void appendServerModDownloadsList(std::variant<Mod*, ServerModMetadata> mod, DownloadStatus status) {
+	size_t i = 0;
+	//geode::log::debug("APPENDING");
+	for (auto m : serverModDownloadsList) {
+		if ((std::holds_alternative<Mod*>(m.first) && std::holds_alternative<Mod*>(mod)) || (std::holds_alternative<ServerModMetadata>(m.first) && std::holds_alternative<ServerModMetadata>(mod))) {
+			serverModDownloadsList[i] = std::make_pair(mod, status);
+			return;
+		}
+		i++;
+	}
+	serverModDownloadsList.push_back(std::make_pair(mod, status));
 }
 
 class comma_numpunct : public std::numpunct<char> {
@@ -131,7 +172,7 @@ std::optional<std::variant<Mod*, ServerModMetadata>> getModFromNode(CCNode* node
 	if (theStuff != nullptr) { // i dont think it could ever be nullptr?
 		return *theStuff;
 	}
-	geode::log::warn("Geode UI Tweaks could not find ModItem::m_source, a recent geode update could be the cause of this."); // Imagine
+	geode::log::warn("Geode UI Tweaks could not find ModItem::m_source.m_value, a recent geode update could be the cause of this."); // Imagine
 	return std::nullopt;
 
 	// // sometimes mod id is found at 0x140 so we check that first (aka its probably ServerModMetadata)
@@ -173,10 +214,20 @@ std::optional<std::variant<Mod*, ServerModMetadata>> getModFromNode(CCNode* node
 std::optional<std::variant<Mod*, ServerModMetadata>> getModFromPopup(CCNode* node) {
 	auto addr = reinterpret_cast<uintptr_t>(node) + 0x2a8;
 	auto theStuff = reinterpret_cast<std::variant<Mod*, ServerModMetadata>*>(addr);
-	if (theStuff != nullptr) {
+	if (theStuff != nullptr) { // useless check ill replace it later
 		return *theStuff;
 	}
-	geode::log::warn("Geode UI Tweaks could not find ModPopup::m_source, a recent geode update could be the cause of this.");
+	geode::log::warn("Geode UI Tweaks could not find ModPopup::m_source.m_value, a recent geode update could be the cause of this.");
+	return std::nullopt;
+}
+
+std::optional<ServerModUpdate> getModUpdateFromNode(CCNode* node) {
+	auto addr = reinterpret_cast<uintptr_t>(node) + 0x140 + 0x140; // no way
+	auto theStuff = reinterpret_cast<std::optional<ServerModUpdate>*>(addr);
+	if (theStuff != nullptr) { // this one might not be possible to replace lol
+		return *theStuff;
+	}
+	geode::log::warn("Geode UI Tweaks could not find ModItem::m_source.m_availableUpdate");
 	return std::nullopt;
 }
 
@@ -264,13 +315,17 @@ void modItemModify(CCNode* node) {
 			size_t downloadCount = 0;
 			size_t requestedAction = 0;
 			bool restartRequired = false;
+			std::optional<ServerModUpdate> availableUpdate = getModUpdateFromNode(node);
+			if (availableUpdate.has_value()) {
+				appendServerModUpdate(availableUpdate.value());
+			}
+			bool isDownloading = false;
+			bool hasDownloaded = false;
 			std::visit(geode::utils::makeVisitor {
 				[&](Mod* dMod) {
 					id = dMod->getID();
 					tags = dMod->getMetadata().getTags();
 					isEnabled = dMod->isEnabled();
-					requestedAction = static_cast<size_t>(dMod->getRequestedAction());
-					restartRequired = (requestedAction != 0) || (ModSettingsManager::from(dMod)->restartRequired());
 					//Mod doesnt store featured :(
 				},
 				[&](ServerModMetadata const& metadata) {
@@ -280,15 +335,45 @@ void modItemModify(CCNode* node) {
 					isFeatured = metadata.featured;
 					downloadCount = metadata.downloadCount;
 					//geode::log::debug("id: {} tags: {} featured: {}", id, tags, isFeatured);
-					for (auto m : serverModDownloadedList) {
-						if (m.id == id) {
-							restartRequired = true;
-							break;
-						}
-					}
 					appendServerMod(metadata);
 				}
 			}, nMod);
+			if (auto lMod = Loader::get()->getInstalledMod(id)) { // put some things in here to MAKE SURE nothing breaks
+				requestedAction = static_cast<size_t>(lMod->getRequestedAction());
+				restartRequired = (requestedAction != 0) || (ModSettingsManager::from(lMod)->restartRequired());
+			}
+			geode::log::debug("nya_uwugayreal {} {} {}", id, requestedAction, restartRequired);
+			for (auto m : serverModDownloadsList) {
+				//geode::log::debug("huuuh");
+				std::visit(geode::utils::makeVisitor {
+					[&](Mod* mod) {
+						//geode::log::debug("{} {}", mod->getID(), id);
+						if (mod->getID() == id) {
+							//geode::log::debug("guh guh guh guh");
+							if (std::holds_alternative<DownloadStatusDone>(m.second)) {
+								restartRequired = true;
+								hasDownloaded = true;
+							}
+							if (!(std::holds_alternative<DownloadStatusDone>(m.second) || std::holds_alternative<DownloadStatusError>(m.second) || std::holds_alternative<DownloadStatusCancelled>(m.second))) {
+								isDownloading = true;
+							}
+						}
+					},
+					[&](ServerModMetadata metadata) {
+						//geode::log::debug("{} {}", mod->getID(), id);
+						if (metadata.id == id) {
+							//geode::log::debug("nya nya nya nya");
+							if (std::holds_alternative<DownloadStatusDone>(m.second)) {
+								restartRequired = true;
+								hasDownloaded = true;
+							}
+							if (!(std::holds_alternative<DownloadStatusDone>(m.second) || std::holds_alternative<DownloadStatusError>(m.second) || std::holds_alternative<DownloadStatusCancelled>(m.second))) {
+								isDownloading = true;
+							}
+						}
+					}
+				}, m.first);
+			}
 			static std::locale commaLocale(std::locale(), new comma_numpunct());
 			auto bg = static_cast<CCScale9Sprite*>(node->getChildByID("bg"));
 			auto logoSprite = node->getChildByID("logo-sprite");
@@ -343,6 +428,13 @@ void modItemModify(CCNode* node) {
 					}
 					if ((tags.contains("modtober24winner") || id == "rainixgd.geome3dash") && isServerMod) {
 						auto color4 = mod->getSettingValue<ccColor4B>("tl-modtober-winner-color");
+						auto color = ccColor3B{color4.r, color4.g, color4.b};
+						bg->setColor(color);
+						bg->setOpacity(color4.a);
+					}
+					//geode::log::debug("is {} has {}", isDownloading, hasDownloaded);
+					if (availableUpdate && !(isDownloading || hasDownloaded)) {
+						auto color4 = mod->getSettingValue<ccColor4B>("tl-updates-available-color");
 						auto color = ccColor3B{color4.r, color4.g, color4.b};
 						bg->setColor(color);
 						bg->setOpacity(color4.a);
@@ -499,115 +591,224 @@ class $modify(CCScheduler) {
 	}
 };
 
-void modDownloadChecker(web::WebResponse* response, std::string id, std::string url) {
-	auto oServerMod = getServerMod(id);
-	//geode::log::debug("I PROBABLY BROKE SOMETHING {}", oServerMod.has_value());
-	if (oServerMod.has_value()) {
-		auto serverMod = oServerMod.value();
-		std::optional<ServerModVersion> oVersion = std::nullopt; // im in love with std::optional
-		for (ServerModVersion v : serverMod.versions) {
-			//geode::log::debug("version test lol {} {}", v.downloadURL, url);
-			if (v.downloadURL == url) {
-				oVersion = v;
+void modDownloadChecker(web::WebResponse* response, std::variant<Mod*, ServerModMetadata> mod, std::string_view url) {
+	std::string id;
+	std::optional<ServerModVersion> oVersion = std::nullopt; // im in love with std::optional
+	std::visit(geode::utils::makeVisitor {
+		[&](Mod* dMod) {
+			id = dMod->getID();
+			//geode::log::debug("oh no");
+			for (auto v : serverModVersionList) {
+				//geode::log::debug("it is better to not think about it {} {}", v.first, id);
+				if (v.first == id) {
+					oVersion = v.second;
+				}
+			}
+		},
+		[&](ServerModMetadata metadata) {
+			id = metadata.id;
+			for (ServerModVersion v : metadata.versions) {
+				//geode::log::debug("version test lol {} {}", v.downloadURL, url);
+				if (v.downloadURL == url) {
+					oVersion = v;
+				}
 			}
 		}
-		if (response->ok() && oVersion.has_value()) {
-			auto version = oVersion.value();
-			// my recreation of m_downloadListener.bind in DownloadManager::confirm
-			if (auto actualHash = calculateHash(response->data()); actualHash != version.hash) {
-				//geode::log::info("INVALID HASH");
-				// invalid hash!
-				return;
-			}
-			// there is something for if it cant delete existing .geode package but we only care about installing not updating plus there is no solution besides overwriting (guh)
-			// also this is stupid lol but idk im not writing anything!
-			auto dir = dirs::getModsDir() / (id + ".geode");
-			std::ofstream file;
+	}, mod);
+	DownloadStatus status;
+	if (response->ok() && oVersion.has_value()) {
+		auto version = oVersion.value();
+		// my recreation of m_downloadListener.bind in DownloadManager::confirm
+		if (auto actualHash = calculateHash(response->data()); actualHash != version.hash) {
+			geode::log::info("INVALID HASH");
+			status = DownloadStatusError{.details="Hash mismatch, downloaded file did not match what was expected"};
+			//serverModDownloadsList.insert_or_assign(serverMod, status);
+			appendServerModDownloadsList(mod, status);
+			// invalid hash!
+			return;
+		}
+		// there is something for if it cant delete existing .geode package but we only care about installing not updating plus there is no solution besides overwriting (guh)
+		// also this is stupid lol but idk im not writing anything!
+		auto dir = dirs::getModsDir() / (id + ".geode");
+		std::ofstream file;
 #ifdef GEODE_IS_WINDOWS
-			file.open(dir.wstring(), std::ios::out | std::ios::binary);
+		file.open(dir.wstring(), std::ios::out | std::ios::binary);
 #else
-			file.open(dir.string(), std::ios::out | std::ios::binary);
+		file.open(dir.string(), std::ios::out | std::ios::binary);
 #endif
-			if (!file.is_open()) {
-				//geode::log::info("UNABLE TO WRITE GEODE FILE");
-				// oops it cant write!
-				return;
-			}
-			file.close(); // am i writing too many comments?
-			serverModDownloadedList.push_back(serverMod);
+		if (!file.is_open()) {
+			geode::log::info("UNABLE TO WRITE GEODE FILE");
+			status = DownloadStatusError{.details="Unable to open file"};
+			//serverModDownloadsList.insert_or_assign(serverMod, status);
+			appendServerModDownloadsList(mod, status);
+			// oops it cant write!
+			return;
 		}
+		file.close(); // am i writing too many comments?
+		status = DownloadStatusDone{.version=version};
+		//serverModDownloadsList.insert_or_assign(serverMod, status);
+		//geode::log::debug("hey guys, pointcrow here, do you ever get collectors anxiety?");
+		appendServerModDownloadsList(mod, status);
+		return;
+	}
+	status = DownloadStatusError{.details=response->string().unwrapOr("Unknown error")};
+	//serverModDownloadsList.insert_or_assign(serverMod, status);
+	appendServerModDownloadsList(mod, status);
+}
+
+// should have called it mod!DownloadChecker
+void modNotDownloadChecker(web::WebResponse* response, std::variant<Mod*, ServerModMetadata> mod, std::string_view url) {
+	DownloadStatus status;
+	if (response->ok()) {
+		auto payload = parseServerPayload(*response);
+		if (!payload) {
+			// Oof
+			status = DownloadStatusError{.details=payload.unwrapErr().details};
+			return;
+		}
+		auto list = ServerModVersion::parse(payload.unwrap());
+		if (!list) {
+			// Unable to parse response
+			status = DownloadStatusError{.details=ServerError(response->code(), "Unable to parse response: {}", list.unwrapErr()).details};
+			return;
+		}
+		// yay!
+		std::string modID;
+		std::visit(geode::utils::makeVisitor {
+			[&](Mod* mod) {
+				modID = mod->getID();
+			},
+			[&](ServerModMetadata metadata) {
+				modID = metadata.id;
+			}
+		}, mod);
+		auto data = list.unwrap();
+		appendServerModVersion(modID, data);
+		status = DownloadStatusConfirm{.version=data};
+		appendServerModDownloadsList(mod, status);
+		return;
 	}
 }
 
 //https://api.geode-sdk.org/v1/mods/{id}/versions/{version}/download
 
 // using GDIntercept code (kinda) so i can hook onto a SINGLE request omg (maybe more later idk)
-web::WebTask GeodeWebHook(web::WebRequest* request, std::string_view method, std::string_view url) {
-	if (std::find(proxyIDList.begin(), proxyIDList.end(), request->getID()) == proxyIDList.end()) { // anti proxy thingie (no duplicates i guess?)
-		proxyIDList.push_back(request->getID());
-		bool isDownload = false;
-		std::string modID;
-		std::string sURL = std::string(url);
-		//geode::log::debug("{}", std::string(url));
-		std::string apiURL = "https://api.geode-sdk.org/v1/mods/";
-		// when you dont use regex
-		if (sURL.starts_with(apiURL)) {
-			//geode::log::debug("geode idk");
-			std::string nURL = sURL.substr(apiURL.size());
-			//geode::log::debug("{}", nURL);
-			size_t slash1 = nURL.find("/");
-			if (slash1 != std::string::npos) {
-				modID = nURL.substr(0, slash1);
-				//geode::log::debug("wha {}", modID);
-				nURL = nURL.substr(slash1); // hmm
-				//geode::log::debug("insane {}", nURL);
-				std::string vURL = "/versions/";
-				if (nURL.starts_with(vURL)) {
-					//geode::log::debug("INCORRECT!!!");
-					nURL = nURL.substr(vURL.size());
-					//geode::log::debug("new {}", nURL);
-					size_t slash2 = nURL.find("/");
-					if (slash2 != std::string::npos) {
-						std::string version = nURL.substr(0, slash2);
-						//geode::log::debug("ver {}", version);
-						if (nURL.ends_with("/download")) {
-							//geode::log::debug("is download no way");
-							isDownload = true;
-						}
+// oops i found another request that needs hooking
+// unsure about the need of this function but idc
+web::WebTask doMyRequestsForMe(web::WebRequest* request, const std::string& method, const std::string& url) {
+	//geode::log::debug("IS THE URL OK PLEASE BE OK {}", url);
+	bool isGettingMod = false;
+	bool isDownload = false;
+	std::string modID;
+	std::string sURL = url;
+	//url = std::string_view(sURL);
+	std::string apiURL = "https://api.geode-sdk.org/v1/mods/";
+	// when you dont use regex
+	if (sURL.starts_with(apiURL)) {
+		//geode::log::debug("geode idk");
+		auto nURL = sURL.substr(apiURL.size());
+		//geode::log::debug("{}", nURL);
+		size_t slash1 = nURL.find("/");
+		if (slash1 != std::string::npos) {
+			modID = nURL.substr(0, slash1);
+			//geode::log::debug("wha {}", modID);
+			nURL = nURL.substr(slash1); // hmm
+			//geode::log::debug("insane {}", nURL);
+			std::string vURL = "/versions/";
+			if (nURL.starts_with(vURL)) {
+				//geode::log::debug("INCORRECT!!!");
+				nURL = nURL.substr(vURL.size());
+				//geode::log::debug("new {}", nURL);
+				size_t slash2 = nURL.find("/");
+				if (slash2 == std::string::npos) slash2 = nURL.size();
+				if (nURL.size() > 0) {
+					auto version = nURL.substr(0, slash2);
+					isGettingMod = true;
+					//geode::log::debug("ver {}", version);
+					if (nURL.ends_with("/download")) {
+						//geode::log::debug("is download no way");
+						isDownload = true;
 					}
 				}
 			}
 		}
-		if (isDownload && !Loader::get()->isModInstalled(modID)) {
-			//geode::log::debug("hooking download hehehe");
-			// this looks so much less complicated than in GDIntercept
-			auto task = web::WebTask::run([request, method, url, modID, sURL](auto progress, auto cancelled) -> web::WebTask::Result {
+	}
+	if (isDownload || isGettingMod) {
+		bool shouldGoOn = false;
+		std::variant<Mod*, ServerModMetadata> mod;
+		if (auto iMod = Loader::get()->getInstalledMod(modID)) { // average apple product lol
+			mod = iMod;
+			shouldGoOn = true;
+		} else if (auto oServerMod = getServerMod(modID); oServerMod.has_value()) { // two statements, one line
+			mod = oServerMod.value();
+			shouldGoOn = true;
+		}
+		//geode::log::debug("hooking download hehehe");
+		// this looks so much less complicated than in GDIntercept
+		if (shouldGoOn) {
+			if (!isDownload && isGettingMod) {
+				DownloadStatus status = DownloadStatusFetching{.percentage=0};
+				appendServerModDownloadsList(mod, status);
+			}
+			auto newRequest = new web::WebRequest(*request);
+			auto task = web::WebTask::run([request, method, url, modID, sURL, mod, isDownload, isGettingMod, newRequest](auto progress, auto cancelled) -> web::WebTask::Result {
+				DownloadStatus status;
+
 				web::WebResponse* response = nullptr;
 
-				web::WebTask task = request->send(method, url);
+				//geode::log::debug("method {}\nurl {}\nproper url? {}\nidk anymore {}", method, url, sURL, std::string_view(sURL));
+
+				//geode::log::debug("UWU UWU UWU UWU {}", url);
+
+				web::WebTask task = newRequest->send(method, url);
 
 				task.listen([&response](const web::WebResponse* taskResponse) {
 					response = new web::WebResponse(*taskResponse);
-				}, [progress, cancelled](const web::WebProgress* taskProgress) {
-					if (!cancelled()) progress(*taskProgress);
+				}, [progress, cancelled, mod, &status, isDownload, isGettingMod](const web::WebProgress* taskProgress) {
+					if (cancelled()) return;
+					progress(*taskProgress);
+					if (isDownload) {
+						status = DownloadStatusDownloading{.percentage=static_cast<uint8_t>(taskProgress->downloadProgress().value_or(0))};
+						appendServerModDownloadsList(mod, status);
+					}
+
+					status = DownloadStatusFetching{.percentage=static_cast<uint8_t>(taskProgress->downloadProgress().value_or(0))};
+					if (!isDownload && isGettingMod) appendServerModDownloadsList(mod, status);
 				});
 
-				while (!response && !cancelled()) std::this_thread::sleep_for(std::chrono::milliseconds(2)); // rest
+					while (!response && !cancelled()) std::this_thread::sleep_for(std::chrono::milliseconds(2)); // rest
 
-				if (cancelled()) {
-					task.cancel();
+					if (cancelled()) {
+						task.cancel();
 
-					return web::WebTask::Cancel();
-				} else {
-					//geode::log::debug("response gotten yay!");
+						if (isDownload) {
+							status = DownloadStatusCancelled();
+							appendServerModDownloadsList(mod, status);
+						}
 
-					modDownloadChecker(response, modID, sURL);
+						return web::WebTask::Cancel();
+					} else {
+						//geode::log::debug("response gotten yay!");
 
-					return *response;
-				}
+						//geode::log::debug("i think it is really broken");
+						if (isDownload) modDownloadChecker(response, mod, sURL);
+						if (!isDownload && isGettingMod) modNotDownloadChecker(response, mod, sURL);
+
+						return *response;
+					}
 			}, fmt::format("Proxy for {} {}", method, url));
 			return task;
 		}
+	}
+	return request->send(method, url);
+}
+
+web::WebTask GeodeWebHook(web::WebRequest* request, std::string_view method, std::string_view url) {
+	//geode::log::debug("IS URL FINE? {}", url);
+	//geode::log::debug("sURL {}", sURL);
+	if (std::find(proxyIDList.begin(), proxyIDList.end(), request->getID()) == proxyIDList.end()) { // anti proxy thingie (no duplicates i guess?)
+		proxyIDList.push_back(request->getID());
+		return doMyRequestsForMe(request, std::string(method), std::string(url));
 	}
 	return request->send(method, url);
 }
