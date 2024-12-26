@@ -624,48 +624,68 @@ class $modify(CCScheduler) {
 			modsLayerModify(modsLayerReference);
 		}
 
+		auto mod = Mod::get();
+		auto winSize = CCDirector::sharedDirector()->getWinSize();
+
 		// not even devs using cocos know how to code
 		std::vector<Tooltip*> orphanedTooltips = activeTooltipsList;
-		for (auto pNode : nodesToHoverList) {
-			auto node = pNode.first;
-			auto text = pNode.second;
-			bool alreadyHovered = false;
-			Tooltip* nodeTooltip = nullptr;
-			for (auto t : activeTooltipsList) {
-				if (t->m_nodeFrom == node) {
-					alreadyHovered = true;
-					nodeTooltip = t;
-					orphanedTooltips.erase(std::remove(orphanedTooltips.begin(), orphanedTooltips.end(), t), orphanedTooltips.end());
-					break;
+		if (mod->getSettingValue<bool>("tooltips")) {
+			for (auto pNode : nodesToHoverList) {
+				auto node = pNode.first;
+				auto text = pNode.second;
+				bool alreadyHovered = false;
+				Tooltip* nodeTooltip = nullptr;
+				for (auto t : activeTooltipsList) {
+					if (t->m_nodeFrom == node) {
+						alreadyHovered = true;
+						nodeTooltip = t;
+						orphanedTooltips.erase(std::remove(orphanedTooltips.begin(), orphanedTooltips.end(), t), orphanedTooltips.end());
+						break;
+					}
 				}
-			}
 
-			const CCPoint trueScale = getRecursiveScale(node, {1.f, 1.f});
+				const CCPoint trueScale = getRecursiveScale(node, {1.f, 1.f});
 
-			const CCPoint mousePos = geode::cocos::getMousePos();
-			const CCPoint bottomLeft = node->convertToWorldSpace(node->getAnchorPoint());
-			const CCPoint topRight = bottomLeft + node->getContentSize() * trueScale;
+				const CCPoint mousePos = geode::cocos::getMousePos();
+				const CCPoint bottomLeft = node->convertToWorldSpace(node->getAnchorPoint());
+				const CCPoint topRight = bottomLeft + node->getContentSize() * trueScale;
 
-			//const CCPoint tooltipPos = {(bottomLeft.x + topRight.x) / 2, topRight.y};
-			const CCPoint tooltipPos = {mousePos.x + 5, mousePos.y - 5};
+				//const CCPoint tooltipPos = {(bottomLeft.x + topRight.x) / 2, topRight.y};
+				CCPoint tooltipPos = ccp(mousePos.x + 5.f, mousePos.y - 5.f);
 
-			if (mousePos >= bottomLeft && mousePos <= topRight) {
-				if (!alreadyHovered) {
-					auto tooltip = Tooltip::create(node, text, 0.2f, 400.f, 100.f);
-					if (tooltip) {
-						tooltip->setPosition(tooltipPos);
-						tooltip->setAnchorPoint(ccp(0.f, 0.f));
-						tooltip->show(getSceneFromNode(node));
-						activeTooltipsList.push_back(tooltip);
+				if (mousePos >= bottomLeft && mousePos <= topRight) {
+					if (!alreadyHovered) {
+						auto tooltip = Tooltip::create(node, text, 0.2f, 300.f, 150.f);
+						if (tooltip) {
+
+							tooltip->setID("Tooltip"_spr);
+							tooltip->show(getSceneFromNode(node));
+							activeTooltipsList.push_back(tooltip);
+							nodeTooltip = tooltip;
+						}
+					}
+					if (nodeTooltip) {
+						// make it go on the left side if it goes offscreen on the right
+						bool left = false;
+						float width = nodeTooltip->m_bg->getScaledContentWidth();
+						if (tooltipPos.x + width > winSize.width) {
+							left = true;
+						}
+						// do something else if it goes offscreen on left aswell
+						if (left && tooltipPos.x - 10.f - width < 0.f) {
+							left = false;
+							tooltipPos = ccp(winSize.width - width, tooltipPos.y);
+						}
+						nodeTooltip->setPosition(ccp(tooltipPos.x - (left ? 10.f : 0.f), tooltipPos.y));
+						nodeTooltip->setAnchorPoint(ccp(left ? 1.f : 0.f, 0.f));
 					}
 				} else if (alreadyHovered && nodeTooltip) {
-					nodeTooltip->setPosition(tooltipPos);
+					activeTooltipsList.erase(std::remove(activeTooltipsList.begin(), activeTooltipsList.end(), nodeTooltip), activeTooltipsList.end()); // c++
+					nodeTooltip->fadeOut();
 				}
-			} else if (alreadyHovered && nodeTooltip) {
-				activeTooltipsList.erase(std::remove(activeTooltipsList.begin(), activeTooltipsList.end(), nodeTooltip), activeTooltipsList.end()); // c++
-				nodeTooltip->fadeOut();
 			}
 		}
+		// keep it outside so it can kill any tooltips that existed before turning off tooltips setting
 		for (auto t : orphanedTooltips) {
 			activeTooltipsList.erase(std::remove(activeTooltipsList.begin(), activeTooltipsList.end(), t), activeTooltipsList.end()); // c++
 			t->fadeOut();
