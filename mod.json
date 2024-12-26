@@ -108,6 +108,17 @@
 			"enable-if": "transparent-lists",
 			"enable-if-description": "Enable transparent lists"
 		},
+		"tooltips-title": {
+			"name": "Tooltips",
+			"description": "Custom Tooltips (not) similar to minecraft",
+			"type": "title"
+		},
+		"tooltips": {
+			"name": "Enable",
+			"description": "Global Toggle for Custom Tooltips",
+			"type": "bool",
+			"default": false
+		},
 		"misc-title": {
 			"name": "Miscellaneous",
 			"description": "Features that don't fit into any category.",

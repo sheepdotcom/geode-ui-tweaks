@@ -1,6 +1,7 @@
 #include "Geode/cocos/cocoa/CCObject.h"
 #include "Geode/loader/Event.hpp"
 #include "Geode/loader/Loader.hpp"
+#include "Geode/utils/cocos.hpp"
 #include "Geode/utils/web.hpp"
 #include "Geode/utils/general.hpp"
 #include <Geode/Geode.hpp>
@@ -16,12 +17,14 @@
 #include <variant>
 #include "picosha2.h"
 #include "Server.hpp"
+#include "Tooltip.hpp"
 
 using namespace geode::prelude;
 
 // little notes here, i am starting to move towards commenting code instead of removing it because sometimes i need to revert back (plus i havent commited in so long while writing this because im working on the fixing the uh idk transparent lists)
 // IT IS GETTING SO UNREADABLE HELP
 
+// the amount of global variables is crazy (and all but one are vectors)
 CCNode* modsLayerReference = nullptr;
 std::vector<size_t> proxyIDList; // Idk
 std::vector<ServerModMetadata> serverModList;
@@ -29,6 +32,8 @@ std::vector<ServerModUpdate> serverModUpdateList;
 std::vector<std::pair<std::string, ServerModVersion>> serverModVersionList; // oh god they keep appearing
 //std::map<ServerModMetadata, DownloadStatus> serverModDownloadsList; // guh (this one wont build)
 std::vector<std::pair<std::variant<Mod*, ServerModMetadata>, DownloadStatus>> serverModDownloadsList; // guh x2 (this builds but not map or unordered_map wtf)
+std::vector<std::pair<CCNode*, std::string>> nodesToHoverList; // should be reset every frame idk?
+std::vector<Tooltip*> activeTooltipsList;
 
 bool isGeodeTheme(bool forceDisableTheme = false) {
 	return !forceDisableTheme && Loader::get()->getInstalledMod("geode.loader")->getSettingValue<bool>("enable-geode-theme");
@@ -101,6 +106,26 @@ void appendServerModDownloadsList(std::variant<Mod*, ServerModMetadata> mod, Dow
 	serverModDownloadsList.push_back(std::make_pair(mod, status));
 }
 
+CCScene* getSceneFromNode(CCNode* node) {
+	if (auto p = node->getParent()) {
+		if (typeinfo_cast<CCScene*>(p)) {
+			return static_cast<CCScene*>(p);
+		} else {
+			return getSceneFromNode(p);
+		}
+	}
+	return nullptr;
+}
+
+// ok GDIntercept
+CCPoint getRecursiveScale(CCNode* node, const CCPoint accumulator) {
+	if (node->getParent()) {
+		return getRecursiveScale(node->getParent(), {accumulator.x * node->getScaleX(), accumulator.y * node->getScaleY()});
+	} else {
+		return accumulator;
+	}
+}
+
 class comma_numpunct : public std::numpunct<char> {
 protected:
 	virtual char do_thousands_sep() const
@@ -113,6 +138,10 @@ protected:
 		return "\03";
 	}
 };
+
+Tooltip::~Tooltip() { // hehe
+	activeTooltipsList.erase(std::remove(activeTooltipsList.begin(), activeTooltipsList.end(), this), activeTooltipsList.end());
+}
 
 // Average more janky solution
 
@@ -252,10 +281,11 @@ void modsLayerModify(CCNode* modsLayer) {
 	auto mLists = *reinterpret_cast<std::unordered_map<ModListSource*, Ref<CCNode>>*>(mladdr + 0x1c8);
 	if (auto modListFrame = modsLayer->getChildByID("mod-list-frame")) {
 		//geode::log::debug("{}", mLists.size());
-		for (auto modListPair : mLists) {
+		//for (auto modListPair : mLists) {
+		if (auto modList = modListFrame->getChildByID("ModList")) {
 			//geode::log::debug("counter");
-			auto modList = modListPair.second.data();
-			auto page = *reinterpret_cast<size_t*>(reinterpret_cast<uintptr_t>(modList) + 0x148);
+			//auto modList = modListPair.second.data();
+			//auto page = *reinterpret_cast<size_t*>(reinterpret_cast<uintptr_t>(modList) + 0x148);
 			//geode::log::debug("page ok {}", page);
 			auto searchMenu = modList->getChildByID("top-container")->getChildByID("search-menu");
 			CCLayerColor* searchBG = nullptr;
@@ -287,16 +317,30 @@ void modsLayerModify(CCNode* modsLayer) {
 				searchBG->setVisible(!mod->getSettingValue<bool>("transparent-lists"));
 				someBG->setVisible(mod->getSettingValue<bool>("transparent-lists"));
 			}
-			// if (auto scrollLayer = static_cast<ScrollLayer*>(modList->getChildByID("ScrollLayer"))) {
-			// 	CCObject* obj;
-			// 	CCARRAY_FOREACH(scrollLayer->m_contentLayer->getChildren(), obj) {
-			// 		// should be mod items right
-			// 		auto node = static_cast<CCNode*>(obj);
-			// 		if (typeinfo_cast<ModItem*>(node)) {
-   //
-			// 		}
-			// 	}
-			// }
+			if (auto scrollLayer = static_cast<ScrollLayer*>(modList->getChildByID("ScrollLayer"))) {
+				auto scrollArr = CCArrayExt<CCNode*>(scrollLayer->m_contentLayer->getChildren());
+				for (auto node : scrollArr) {
+					// should be mod items right
+					if (typeinfo_cast<ModItem*>(node)) {
+						auto noMod = getModFromNode(node);
+						if (noMod.has_value()) {
+							auto nMod = noMod.value();
+							ModMetadata nMetadata;
+							std::visit(geode::utils::makeVisitor {
+								[&](Mod* mod) {
+									nMetadata = mod->getMetadata();
+								},
+								[&](ServerModMetadata metadata) {
+									nMetadata = metadata.versions.front().metadata;
+								}
+							}, nMod);
+							std::optional<std::string> description = nMetadata.getDescription();
+							auto pair = std::make_pair(node, description.value_or("[No Description Provided]"));
+							nodesToHoverList.push_back(pair);
+						}
+					}
+				}
+			}
 		}
 	}
 }
@@ -307,6 +351,7 @@ void modItemModify(CCNode* node) {
 		auto noMod = getModFromNode(node);
 		if (noMod.has_value()) {
 			auto nMod = noMod.value();
+			ModMetadata nMetadata;
 			std::string id;
 			std::unordered_set<std::string> tags;
 			bool isServerMod = false;
@@ -325,6 +370,7 @@ void modItemModify(CCNode* node) {
 			bool hasDownloaded = false;
 			std::visit(geode::utils::makeVisitor {
 				[&](Mod* dMod) {
+					nMetadata = dMod->getMetadata();
 					id = dMod->getID();
 					tags = dMod->getMetadata().getTags();
 					isEnabled = dMod->isEnabled();
@@ -333,6 +379,7 @@ void modItemModify(CCNode* node) {
 					hasLoadProblems = dMod->hasLoadProblems();
 				},
 				[&](ServerModMetadata const& metadata) {
+					nMetadata = metadata.versions.front().metadata;
 					isServerMod = true;
 					id = metadata.id;
 					tags = metadata.tags;
@@ -405,9 +452,6 @@ void modItemModify(CCNode* node) {
 					if (!isEnabled) {
 						color4 = mod->getSettingValue<ccColor4B>("tl-disabled-color");
 					}
-					if (isFeatured && isServerMod) {
-						color4 = mod->getSettingValue<ccColor4B>("tl-featured-color");
-					}
 					if (tags.contains("paid") && isServerMod) {
 						color4 = mod->getSettingValue<ccColor4B>("tl-paid-color");
 					}
@@ -417,14 +461,17 @@ void modItemModify(CCNode* node) {
 					if ((tags.contains("modtober24winner") || id == "rainixgd.geome3dash") && isServerMod) {
 						color4 = mod->getSettingValue<ccColor4B>("tl-modtober-winner-color");
 					}
+					if (isFeatured && isServerMod) {
+						color4 = mod->getSettingValue<ccColor4B>("tl-featured-color");
+					}
 					//geode::log::debug("is {} has {}", isDownloading, hasDownloaded);
-					if (availableUpdate && !(isDownloading || hasDownloaded)) {
+					if (availableUpdate.has_value() && !(isDownloading || hasDownloaded)) {
 						color4 = mod->getSettingValue<ccColor4B>("tl-updates-available-color");
 					}
 					if (!isServerMod && hasLoadProblems) {
 						color4 = mod->getSettingValue<ccColor4B>("tl-error-color");
 					}
-					if (!restartRequired && targetsOutdated && !isDownloading) {
+					if (!restartRequired && targetsOutdated.has_value() && !isDownloading) {
 						color4 = mod->getSettingValue<ccColor4B>("tl-outdated-color");
 					}
 					if (restartRequired) { // Restart Required currently
@@ -554,6 +601,7 @@ class $modify(CCDirector) {
 		if (CCDirector::sharedDirector()->getRunningScene()->getChildByID("ModsLayer")) {
 			if (modsLayerReference) {
 				modsLayerReference = nullptr;
+				nodesToHoverList.clear();
 			}
 		}
 
@@ -575,6 +623,54 @@ class $modify(CCScheduler) {
 		if (modsLayerReference) {
 			modsLayerModify(modsLayerReference);
 		}
+
+		// not even devs using cocos know how to code
+		std::vector<Tooltip*> orphanedTooltips = activeTooltipsList;
+		for (auto pNode : nodesToHoverList) {
+			auto node = pNode.first;
+			auto text = pNode.second;
+			bool alreadyHovered = false;
+			Tooltip* nodeTooltip = nullptr;
+			for (auto t : activeTooltipsList) {
+				if (t->m_nodeFrom == node) {
+					alreadyHovered = true;
+					nodeTooltip = t;
+					orphanedTooltips.erase(std::remove(orphanedTooltips.begin(), orphanedTooltips.end(), t), orphanedTooltips.end());
+					break;
+				}
+			}
+
+			const CCPoint trueScale = getRecursiveScale(node, {1.f, 1.f});
+
+			const CCPoint mousePos = geode::cocos::getMousePos();
+			const CCPoint bottomLeft = node->convertToWorldSpace(node->getAnchorPoint());
+			const CCPoint topRight = bottomLeft + node->getContentSize() * trueScale;
+
+			//const CCPoint tooltipPos = {(bottomLeft.x + topRight.x) / 2, topRight.y};
+			const CCPoint tooltipPos = {mousePos.x + 5, mousePos.y - 5};
+
+			if (mousePos >= bottomLeft && mousePos <= topRight) {
+				if (!alreadyHovered) {
+					auto tooltip = Tooltip::create(node, text, 0.2f, 400.f, 100.f);
+					if (tooltip) {
+						tooltip->setPosition(tooltipPos);
+						tooltip->setAnchorPoint(ccp(0.f, 0.f));
+						tooltip->show(getSceneFromNode(node));
+						activeTooltipsList.push_back(tooltip);
+					}
+				} else if (alreadyHovered && nodeTooltip) {
+					nodeTooltip->setPosition(tooltipPos);
+				}
+			} else if (alreadyHovered && nodeTooltip) {
+				activeTooltipsList.erase(std::remove(activeTooltipsList.begin(), activeTooltipsList.end(), nodeTooltip), activeTooltipsList.end()); // c++
+				nodeTooltip->fadeOut();
+			}
+		}
+		for (auto t : orphanedTooltips) {
+			activeTooltipsList.erase(std::remove(activeTooltipsList.begin(), activeTooltipsList.end(), t), activeTooltipsList.end()); // c++
+			t->fadeOut();
+		}
+		nodesToHoverList.clear();
 		CCScheduler::update(dt);
 	}
 };

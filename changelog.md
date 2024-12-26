@@ -1,3 +1,8 @@
+# v0.2.0-alpha.2
+
+- Fixed transparent lists on android
+- Custom tooltips
+
 # v0.2.0-alpha.1
 
 - Color settings for transparent lists.
