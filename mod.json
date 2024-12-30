@@ -119,7 +119,7 @@
 			"type": "bool",
 			"default": false
 		},
-		"tooltips-mod-description": {
+		"tooltips-mod-list-description": {
 			"name": "Mod List Description",
 			"description": "Display the description of a mod in the mod list",
 			"type": "bool",
@@ -144,6 +144,17 @@
 		},
 		"dont-shorten-download-count": {
 			"name": "Don't Shorten Download Count",
+			"type": "bool",
+			"default": false
+		},
+		"debug-title": {
+			"name": "Debug",
+			"description": "For debugging purposes only",
+			"type": "title"
+		},
+		"debug-tooltips-draw": {
+			"name": "Draw tooltip hover area",
+			"description": "Show a rectange around the areas that would trigger a tooltip to be created",
 			"type": "bool",
 			"default": false
 		}

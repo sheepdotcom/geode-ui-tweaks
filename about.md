@@ -9,6 +9,8 @@ Tweak the Geode Mod List UI a bit.
 
 - Transparent mod list
 - Small changes to the mod list
+- Custom tooltips in mod popup and mod list
+  - Description when hovering mod in mod list
 - Other things
 
 ### Planned Features (oh no)

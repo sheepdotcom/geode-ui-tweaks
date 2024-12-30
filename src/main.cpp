@@ -1,6 +1,12 @@
+#include "Geode/cocos/CCDirector.h"
 #include "Geode/cocos/cocoa/CCObject.h"
+#include "Geode/cocos/draw_nodes/CCDrawNode.h"
+#include "Geode/cocos/platform/win32/CCGL.h"
 #include "Geode/loader/Event.hpp"
 #include "Geode/loader/Loader.hpp"
+#include "Geode/loader/Setting.hpp"
+#include "Geode/ui/SceneManager.hpp"
+#include "Geode/utils/addresser.hpp"
 #include "Geode/utils/cocos.hpp"
 #include "Geode/utils/web.hpp"
 #include "Geode/utils/general.hpp"
@@ -15,6 +21,7 @@
 #include <thread>
 #include <unordered_set>
 #include <variant>
+#include "ccTypes.h"
 #include "picosha2.h"
 #include "Server.hpp"
 #include "Tooltip.hpp"
@@ -24,15 +31,31 @@ using namespace geode::prelude;
 // little notes here, i am starting to move towards commenting code instead of removing it because sometimes i need to revert back (plus i havent commited in so long while writing this because im working on the fixing the uh idk transparent lists)
 // IT IS GETTING SO UNREADABLE HELP
 
+struct TooltipMetadata { // guh
+	CCNode* node;
+	std::string text;
+	bool zOrderCheck = true;
+	std::optional<CCRect> limitedArea = std::nullopt;
+
+	TooltipMetadata() = default;
+	TooltipMetadata(CCNode* node, std::string text) : node(node), text(text) {}
+	TooltipMetadata(CCNode* node, std::string text, bool zOrderCheck) : node(node), text(text), zOrderCheck(zOrderCheck) {}
+	TooltipMetadata(CCNode* node, std::string text, std::optional<CCRect> limitedArea) : node(node), text(text), limitedArea(limitedArea) {}
+	TooltipMetadata(CCNode* node, std::string text, bool zOrderCheck, std::optional<CCRect> limitedArea) : node(node), text(text), zOrderCheck(zOrderCheck), limitedArea(limitedArea) {}
+};
+
 // the amount of global variables is crazy (and all but one are vectors)
 CCNode* modsLayerReference = nullptr;
+FLAlertLayer* modPopupReference = nullptr;
+CCDrawNode* debugDrawNode = nullptr;
 std::vector<size_t> proxyIDList; // Idk
 std::vector<ServerModMetadata> serverModList;
 std::vector<ServerModUpdate> serverModUpdateList;
+std::vector<ServerTag> serverTagList;
 std::vector<std::pair<std::string, ServerModVersion>> serverModVersionList; // oh god they keep appearing
 //std::map<ServerModMetadata, DownloadStatus> serverModDownloadsList; // guh (this one wont build)
 std::vector<std::pair<std::variant<Mod*, ServerModMetadata>, DownloadStatus>> serverModDownloadsList; // guh x2 (this builds but not map or unordered_map wtf)
-std::vector<std::pair<CCNode*, std::string>> nodesToHoverList; // should be reset every frame idk?
+std::vector<TooltipMetadata> nodesToHoverList; // should be reset every frame idk?
 std::vector<Tooltip*> activeTooltipsList;
 
 bool isGeodeTheme(bool forceDisableTheme = false) {
@@ -106,21 +129,35 @@ void appendServerModDownloadsList(std::variant<Mod*, ServerModMetadata> mod, Dow
 	serverModDownloadsList.push_back(std::make_pair(mod, status));
 }
 
+CCNode* getTopNodeFromNode(CCNode* node) {
+	if (node) {
+		if (auto p = node->getParent()) {
+			if (typeinfo_cast<CCScene*>(p)) {
+				return node;
+			} else {
+				return getTopNodeFromNode(p);
+			}
+		}
+	}
+	return nullptr;
+}
+
 CCScene* getSceneFromNode(CCNode* node) {
-	if (auto p = node->getParent()) {
-		if (typeinfo_cast<CCScene*>(p)) {
-			return static_cast<CCScene*>(p);
-		} else {
-			return getSceneFromNode(p);
+	CCNode* topNode = getTopNodeFromNode(node);
+	if (topNode) {
+		if (auto p = topNode->getParent()) {
+			if (typeinfo_cast<CCScene*>(p)) {
+				return static_cast<CCScene*>(p);
+			}
 		}
 	}
 	return nullptr;
 }
 
 // ok GDIntercept
-CCPoint getRecursiveScale(CCNode* node, const CCPoint accumulator) {
+CCSize getRecursiveScale(CCNode* node, const CCSize accumulator) {
 	if (node->getParent()) {
-		return getRecursiveScale(node->getParent(), {accumulator.x * node->getScaleX(), accumulator.y * node->getScaleY()});
+		return getRecursiveScale(node->getParent(), {accumulator.width * node->getScaleX(), accumulator.height * node->getScaleY()});
 	} else {
 		return accumulator;
 	}
@@ -141,6 +178,28 @@ protected:
 
 Tooltip::~Tooltip() { // hehe
 	activeTooltipsList.erase(std::remove(activeTooltipsList.begin(), activeTooltipsList.end(), this), activeTooltipsList.end());
+}
+
+void makeDebugDrawNode() {
+	if (!debugDrawNode) {
+		debugDrawNode = CCDrawNode::create();
+		debugDrawNode->retain();
+		debugDrawNode->setID("debug-draw-node"_spr);
+		debugDrawNode->setZOrder(99);
+		_ccBlendFunc blendFunc;
+		blendFunc.src = GL_SRC_ALPHA;
+		blendFunc.dst = GL_ONE_MINUS_SRC_ALPHA;
+		debugDrawNode->setBlendFunc(blendFunc);
+	}
+	SceneManager::get()->keepAcrossScenes(debugDrawNode);
+}
+
+void removeDebugDrawNode() {
+	if (debugDrawNode) {
+		debugDrawNode->clear();
+		SceneManager::get()->forget(debugDrawNode);
+		debugDrawNode->removeFromParentAndCleanup(false);
+	}
 }
 
 // Average more janky solution
@@ -262,11 +321,13 @@ std::optional<ServerModUpdate> getModUpdateFromNode(CCNode* node) {
 
 class ModListSource {};
 
-class ModList : CCNode {};
+class ModList : public CCNode {};
 
-class ModItem : CCNode {};
+class ModItem : public CCNode {};
 
-class ModPopup : CCNode {};
+class ModPopup : public CCNode {};
+
+class ModsLayer : public CCNode {};
 
 // Soooo about the indentations, uh nullptr checking i guess? dont want game to randomly crash!
 // especially on the geode ui, very important for managing mods
@@ -334,9 +395,20 @@ void modsLayerModify(CCNode* modsLayer) {
 									nMetadata = metadata.versions.front().metadata;
 								}
 							}, nMod);
-							std::optional<std::string> description = nMetadata.getDescription();
-							auto pair = std::make_pair(node, description.value_or("[No Description Provided]"));
-							nodesToHoverList.push_back(pair);
+							// empty string / only spaces checker
+							std::optional<std::string> oDescription = nMetadata.getDescription();
+							std::string description = oDescription.value_or("[No Description Provided]");
+							std::string tempDesc = description;
+							tempDesc.erase(std::remove(tempDesc.begin(), tempDesc.end(), ' '), tempDesc.end());
+							if (tempDesc.empty()) {
+								description = "[No Description Provided]";
+							}
+
+							if (mod->getSettingValue<bool>("tooltips-mod-list-description")) {
+								CCRect rect = CCRect(scrollLayer->convertToWorldSpace(scrollLayer->getAnchorPoint()), scrollLayer->getContentSize() * getRecursiveScale(scrollLayer, {1.f, 1.f}));
+								auto tm = TooltipMetadata(node, description, true, rect);
+								nodesToHoverList.push_back(tm);
+							}
 						}
 					}
 				}
@@ -572,14 +644,47 @@ void modPopupModify(CCNode* popup) {
 	}
 }
 
-#include <Geode/modify/CCLayer.hpp>
+void otherModPopupModify(FLAlertLayer* popup) {
+	auto mod = Mod::get();
+	CCLayer* mainLayer = popup->m_mainLayer;
+	if (mainLayer) {
+		CCNode* tagsContainer = mainLayer->getChildByIDRecursive("tags-container"); // one of the only things with a node id like come on
+		if (tagsContainer) {
+			auto arr = CCArrayExt<CCNode*>(tagsContainer->getChildren());
+			for (CCNode* n : arr) {
+				if (auto label = n->getChildByType<CCLabelBMFont*>(0)) {
+					label->getString();
+				}
+			}
+		}
+	}
+}
 
-class ModsLayer : public CCNode {};
+#include <Geode/modify/FLAlertLayer.hpp>
+
+class $modify(CustomPopup, FLAlertLayer) {
+	bool init(FLAlertLayerProtocol* p0, char const* p1, gd::string p2, char const* p3, char const* p4, float p5, bool p6, float p7, float p8) {
+		if (!FLAlertLayer::init(p0, p1, p2, p3, p4, p5, p6, p7, p8)) return false;
+
+		if (typeinfo_cast<ModPopup*>(this)) {
+			modPopupReference = this;
+		}
+
+		return true;
+	}
+
+	void removeFromParentAndCleanup(bool cleanup) {
+		if (typeinfo_cast<ModPopup*>(this)) {
+			modPopupReference = nullptr;
+		}
+		FLAlertLayer::removeFromParentAndCleanup(cleanup);
+	}
+};
+
+#include <Geode/modify/CCLayer.hpp>
 
 class $modify(CustomModsLayer, CCLayer) {
 	bool init() {
-		auto winSize = CCDirector::sharedDirector()->getWinSize();
-
 		if (!CCLayer::init()) return false;
 
 		if (auto modslayer = typeinfo_cast<ModsLayer*>(this)) {
@@ -598,10 +703,15 @@ class $modify(CustomModsLayer, CCLayer) {
 class $modify(CCDirector) {
 	bool replaceScene(CCScene* pScene) {
 		// No crash when ModsLayer no longer exists (ill keep this just in case)
-		if (CCDirector::sharedDirector()->getRunningScene()->getChildByID("ModsLayer")) {
-			if (modsLayerReference) {
-				modsLayerReference = nullptr;
-				nodesToHoverList.clear();
+		if (modsLayerReference) {
+			CCScene* scene = CCDirector::sharedDirector()->getRunningScene();
+			auto arr = CCArrayExt<CCNode*>(scene->getChildren());
+			for (CCNode* n : arr) {
+				if (typeinfo_cast<ModsLayer*>(n)) {
+					modsLayerReference = nullptr;
+					nodesToHoverList.clear();
+					break;
+				}
 			}
 		}
 
@@ -624,15 +734,31 @@ class $modify(CCScheduler) {
 			modsLayerModify(modsLayerReference);
 		}
 
+		if (modPopupReference) {
+			otherModPopupModify(modPopupReference);
+		}
+
 		auto mod = Mod::get();
-		auto winSize = CCDirector::sharedDirector()->getWinSize();
+		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
+
+		if (mod->getSettingValue<bool>("debug-tooltips-draw")) makeDebugDrawNode();
+		
+		if (debugDrawNode) {
+			debugDrawNode->clear();
+			debugDrawNode->setVisible(true);
+		}
+
+		const ccColor4F debugColor = ccColor4F{ 255/255.f, 175/255.f, 204/255.f, 255/255.f };
 
 		// not even devs using cocos know how to code
 		std::vector<Tooltip*> orphanedTooltips = activeTooltipsList;
 		if (mod->getSettingValue<bool>("tooltips")) {
-			for (auto pNode : nodesToHoverList) {
-				auto node = pNode.first;
-				auto text = pNode.second;
+			for (auto mNode : nodesToHoverList) {
+				CCNode* node = mNode.node;
+				std::string text = mNode.text;
+				bool zOrderCheck = mNode.zOrderCheck;
+				std::optional<CCRect> oLimitedArea = mNode.limitedArea;
+				CCRect limitedArea = oLimitedArea.has_value() ? oLimitedArea.value() : CCRect{{0, 0}, winSize};
 				bool alreadyHovered = false;
 				Tooltip* nodeTooltip = nullptr;
 				for (auto t : activeTooltipsList) {
@@ -653,13 +779,62 @@ class $modify(CCScheduler) {
 				//const CCPoint tooltipPos = {(bottomLeft.x + topRight.x) / 2, topRight.y};
 				CCPoint tooltipPos = ccp(mousePos.x + 5.f, mousePos.y - 5.f);
 
-				if (mousePos >= bottomLeft && mousePos <= topRight) {
+				CCNode* topNode = getTopNodeFromNode(node);
+				CCScene* scene = getSceneFromNode(topNode);
+
+				bool isCoveredUp = false;
+				if (zOrderCheck && scene && topNode) {
+					auto arr = CCArrayExt<CCNode*>(scene->getChildren());
+					std::reverse(arr.begin(), arr.end());
+					for (CCNode* n : arr) {
+						// cocos should guarantee that everything is sorted by zOrder (the one case is if someone is REALLY REALLY REALLY stupid and somehow manually appends a child without using addChild which auto re-orders everything)
+						if (n->getZOrder() < topNode->getZOrder()) {
+							break;
+						}
+						// check only for FLAlertLayer
+						if (typeinfo_cast<FLAlertLayer*>(n) && n->getZOrder() > topNode->getZOrder()) {
+							isCoveredUp = true;
+							break;
+						}
+					}
+					std::reverse(arr.begin(), arr.end());
+				}
+
+				bool withinLimitedArea = false;
+				if (mousePos >= limitedArea.origin && mousePos <= limitedArea.origin + limitedArea.size) {
+					withinLimitedArea = true;
+				}
+
+				if (mod->getSettingValue<bool>("debug-tooltips-draw") && debugDrawNode) {
+					CCPoint maxTopRight = limitedArea.origin + limitedArea.size;
+					bool shouldDrawDebug = true;
+					if (isCoveredUp) {
+						shouldDrawDebug = false;
+					}
+					if (topRight.x < limitedArea.origin.x || bottomLeft.x > maxTopRight.x) {
+						shouldDrawDebug = false;
+					} else if (topRight.y < limitedArea.origin.y || bottomLeft.y > maxTopRight.y) {
+						shouldDrawDebug = false;
+					}
+					if (shouldDrawDebug) {
+						CCPoint dTopRight = ccp(std::fmin(topRight.x, maxTopRight.x), std::fmin(topRight.y, maxTopRight.y));
+						CCPoint dBottomLeft = ccp(std::fmax(bottomLeft.x, limitedArea.origin.x), std::fmax(bottomLeft.y, limitedArea.origin.y));
+						CCPoint dTopLeft = ccp(dBottomLeft.x, dTopRight.y);
+						CCPoint dBottomRight = ccp(dTopRight.x, dBottomLeft.y);
+						float thickness = .5f;
+						debugDrawNode->drawSegment(dTopLeft, dTopRight, thickness, debugColor);
+						debugDrawNode->drawSegment(dTopRight, dBottomRight, thickness, debugColor);
+						debugDrawNode->drawSegment(dBottomRight, dBottomLeft, thickness, debugColor);
+						debugDrawNode->drawSegment(dBottomLeft, dTopLeft, thickness, debugColor);
+					}
+				}
+
+				if ((mousePos >= bottomLeft && mousePos <= topRight) && withinLimitedArea && !isCoveredUp) {
 					if (!alreadyHovered) {
 						auto tooltip = Tooltip::create(node, text, 0.2f, 300.f, 150.f);
 						if (tooltip) {
-
 							tooltip->setID("Tooltip"_spr);
-							tooltip->show(getSceneFromNode(node));
+							tooltip->show(scene);
 							activeTooltipsList.push_back(tooltip);
 							nodeTooltip = tooltip;
 						}
@@ -690,6 +865,7 @@ class $modify(CCScheduler) {
 			activeTooltipsList.erase(std::remove(activeTooltipsList.begin(), activeTooltipsList.end(), t), activeTooltipsList.end()); // c++
 			t->fadeOut();
 		}
+		// if (debugDrawNode) debugDrawNode->draw();
 		nodesToHoverList.clear();
 		CCScheduler::update(dt);
 	}
@@ -768,12 +944,14 @@ void modNotDownloadChecker(web::WebResponse* response, std::variant<Mod*, Server
 		if (!payload) {
 			// Oof
 			status = DownloadStatusError{.details=payload.unwrapErr().details};
+			appendServerModDownloadsList(mod, status);
 			return;
 		}
 		auto list = ServerModVersion::parse(payload.unwrap());
 		if (!list) {
 			// Unable to parse response
 			status = DownloadStatusError{.details=ServerError(response->code(), "Unable to parse response: {}", list.unwrapErr()).details};
+			appendServerModDownloadsList(mod, status);
 			return;
 		}
 		// yay!
@@ -792,6 +970,22 @@ void modNotDownloadChecker(web::WebResponse* response, std::variant<Mod*, Server
 		appendServerModDownloadsList(mod, status);
 		return;
 	}
+	status = DownloadStatusError{.details=parseServerError(*response).details};
+	appendServerModDownloadsList(mod, status);
+}
+
+void tagChecker(web::WebResponse* response) {
+	if (response->ok()) {
+		auto payload = parseServerPayload(*response);
+		if (!payload) {
+			return;
+		}
+		auto list = ServerTag::parseList(payload.unwrap());
+		if (!list) {
+			return;
+		}
+		serverTagList = list.unwrap();
+	}
 }
 
 //https://api.geode-sdk.org/v1/mods/{id}/versions/{version}/download
@@ -803,10 +997,12 @@ web::WebTask doMyRequestsForMe(web::WebRequest* request, const std::string& meth
 	//geode::log::debug("IS THE URL OK PLEASE BE OK {}", url);
 	bool isGettingMod = false;
 	bool isDownload = false;
+	bool isTags = false;
 	std::string modID;
 	std::string sURL = url;
 	//url = std::string_view(sURL);
 	std::string apiURL = "https://api.geode-sdk.org/v1/mods/";
+	std::string apiURL2 = "https://api.geode-sdk.org/v1/";
 	// when you dont use regex
 	if (sURL.starts_with(apiURL)) {
 		//geode::log::debug("geode idk");
@@ -836,33 +1032,39 @@ web::WebTask doMyRequestsForMe(web::WebRequest* request, const std::string& meth
 				}
 			}
 		}
+	} else if (sURL.starts_with(apiURL2)) {
+		auto nURL = sURL.substr(apiURL2.size());
+		if (nURL.starts_with("detailed-tags")) {
+			isTags = true;
+		}
 	}
-	if (isDownload || isGettingMod) {
+	if (isDownload || isGettingMod || isTags) {
 		bool shouldGoOn = false;
 		std::variant<Mod*, ServerModMetadata> mod;
-		if (auto iMod = Loader::get()->getInstalledMod(modID)) { // average apple product lol
-			mod = iMod;
-			shouldGoOn = true;
-		} else if (auto oServerMod = getServerMod(modID); oServerMod.has_value()) { // two statements, one line
-			mod = oServerMod.value();
+		if (isDownload || isGettingMod) {
+			if (auto iMod = Loader::get()->getInstalledMod(modID)) { // average apple product lol
+				mod = iMod;
+				shouldGoOn = true;
+			} else if (auto oServerMod = getServerMod(modID); oServerMod.has_value()) { // two statements, one line
+				mod = oServerMod.value();
+				shouldGoOn = true;
+			}
+		} else {
 			shouldGoOn = true;
 		}
 		//geode::log::debug("hooking download hehehe");
 		// this looks so much less complicated than in GDIntercept
+		// soo its getting much worse i hate this
 		if (shouldGoOn) {
 			if (!isDownload && isGettingMod) {
 				DownloadStatus status = DownloadStatusFetching{.percentage=0};
 				appendServerModDownloadsList(mod, status);
 			}
 			auto newRequest = new web::WebRequest(*request);
-			auto task = web::WebTask::run([request, method, url, modID, sURL, mod, isDownload, isGettingMod, newRequest](auto progress, auto cancelled) -> web::WebTask::Result {
+			auto task = web::WebTask::run([request, method, url, modID, sURL, mod, isDownload, isGettingMod, isTags, newRequest](auto progress, auto cancelled) -> web::WebTask::Result {
 				DownloadStatus status;
 
 				web::WebResponse* response = nullptr;
-
-				//geode::log::debug("method {}\nurl {}\nproper url? {}\nidk anymore {}", method, url, sURL, std::string_view(sURL));
-
-				//geode::log::debug("UWU UWU UWU UWU {}", url);
 
 				web::WebTask task = newRequest->send(method, url);
 
@@ -874,10 +1076,10 @@ web::WebTask doMyRequestsForMe(web::WebRequest* request, const std::string& meth
 					if (isDownload) {
 						status = DownloadStatusDownloading{.percentage=static_cast<uint8_t>(taskProgress->downloadProgress().value_or(0))};
 						appendServerModDownloadsList(mod, status);
+					} else if (isGettingMod) {
+						status = DownloadStatusFetching{.percentage=static_cast<uint8_t>(taskProgress->downloadProgress().value_or(0))};
+						appendServerModDownloadsList(mod, status);
 					}
-
-					status = DownloadStatusFetching{.percentage=static_cast<uint8_t>(taskProgress->downloadProgress().value_or(0))};
-					if (!isDownload && isGettingMod) appendServerModDownloadsList(mod, status);
 				});
 
 					while (!response && !cancelled()) std::this_thread::sleep_for(std::chrono::milliseconds(2)); // rest
@@ -892,11 +1094,9 @@ web::WebTask doMyRequestsForMe(web::WebRequest* request, const std::string& meth
 
 						return web::WebTask::Cancel();
 					} else {
-						//geode::log::debug("response gotten yay!");
-
-						//geode::log::debug("i think it is really broken");
 						if (isDownload) modDownloadChecker(response, mod, sURL);
 						if (!isDownload && isGettingMod) modNotDownloadChecker(response, mod, sURL);
+						if (isTags) tagChecker(response);
 
 						return *response;
 					}
@@ -937,4 +1137,18 @@ $execute {
 		modPopupModify(event->getPopup());
 		return ListenerResult::Propagate;
 	});
+
+	listenForSettingChanges("debug-tooltips-draw", [](bool value) {
+		if (value) {
+			makeDebugDrawNode();
+		} else {
+			removeDebugDrawNode();
+		}
+	});
+}
+
+$on_mod(Loaded) {
+	auto mod = Mod::get();
+
+	if (mod->getSettingValue<bool>("debug-tooltips-draw")) makeDebugDrawNode();
 }

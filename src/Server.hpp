@@ -8,6 +8,7 @@
 #include <matjson.hpp>
 #include <fmt/chrono.h>
 #include <date/date.h>
+#include <optional>
 
 using namespace geode::prelude;
 
@@ -457,6 +458,15 @@ struct ServerError final {
     ServerError(int code, fmt::string_view format, Args&&... args) : code(code), details(fmt::vformat(format, fmt::make_format_args(args...))) {}
 };
 
+struct ServerProgress final {
+    std::string message;
+    std::optional<uint8_t> percentage;
+
+    ServerProgress() = default;
+    ServerProgress(std::string const& msg) : message(msg) {}
+    ServerProgress(auto msg, uint8_t percentage) : message(msg), percentage(percentage) {}
+};
+
 static const char* jsonTypeToString(matjson::Type const& type) {
     switch (type) {
         case matjson::Type::Object: return "object";
@@ -482,4 +492,25 @@ static Result<matjson::Value, ServerError> parseServerPayload(web::WebResponse c
         return Err(ServerError(response.code(), "Object does not contain \"payload\" key - got {}", json.dump()));
     }
     return Ok(json["payload"]);
+}
+
+static ServerError parseServerError(web::WebResponse const& error) {
+    if (auto asJson = error.json()) {
+        auto json = asJson.unwrap();
+        if (json.isObject() && json.contains("error") && json["error"].isString()) {
+            return ServerError(error.code(), "{}", json["error"].asString().unwrapOr("Unknown (no error message)"));
+        } else {
+            return ServerError(error.code(), "Unknown (not valid JSON)");
+        }
+    } else {
+        return ServerError(error.code(), "{}", error.string().unwrapOr("Unknown (not a valid string)"));
+    }
+}
+
+static ServerProgress parseServerProgress(web::WebProgress const& prog, auto msg) {
+    if (auto per = prog.downloadProgress()) {
+        return ServerProgress(msg, static_cast<uint8_t>(*per));
+    } else {
+        return ServerProgress(msg);
+    }
 }
