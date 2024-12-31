@@ -1,6 +1,7 @@
 #include "Geode/cocos/CCDirector.h"
 #include "Geode/cocos/cocoa/CCObject.h"
 #include "Geode/cocos/draw_nodes/CCDrawNode.h"
+#include "Geode/cocos/label_nodes/CCLabelBMFont.h"
 #include "Geode/cocos/platform/win32/CCGL.h"
 #include "Geode/loader/Event.hpp"
 #include "Geode/loader/Loader.hpp"
@@ -19,6 +20,7 @@
 #include <date/date.h>
 #include <cstdint>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 #include <variant>
 #include "ccTypes.h"
@@ -31,22 +33,10 @@ using namespace geode::prelude;
 // little notes here, i am starting to move towards commenting code instead of removing it because sometimes i need to revert back (plus i havent commited in so long while writing this because im working on the fixing the uh idk transparent lists)
 // IT IS GETTING SO UNREADABLE HELP
 
-struct TooltipMetadata { // guh
-	CCNode* node;
-	std::string text;
-	bool zOrderCheck = true;
-	std::optional<CCRect> limitedArea = std::nullopt;
-
-	TooltipMetadata() = default;
-	TooltipMetadata(CCNode* node, std::string text) : node(node), text(text) {}
-	TooltipMetadata(CCNode* node, std::string text, bool zOrderCheck) : node(node), text(text), zOrderCheck(zOrderCheck) {}
-	TooltipMetadata(CCNode* node, std::string text, std::optional<CCRect> limitedArea) : node(node), text(text), limitedArea(limitedArea) {}
-	TooltipMetadata(CCNode* node, std::string text, bool zOrderCheck, std::optional<CCRect> limitedArea) : node(node), text(text), zOrderCheck(zOrderCheck), limitedArea(limitedArea) {}
-};
-
 // the amount of global variables is crazy (and all but one are vectors)
+// this might be the main thing stopping me from like separating all my stuff to different files
 CCNode* modsLayerReference = nullptr;
-FLAlertLayer* modPopupReference = nullptr;
+CCLayerColor* modPopupReference = nullptr;
 CCDrawNode* debugDrawNode = nullptr;
 std::vector<size_t> proxyIDList; // Idk
 std::vector<ServerModMetadata> serverModList;
@@ -57,6 +47,7 @@ std::vector<std::pair<std::string, ServerModVersion>> serverModVersionList; // o
 std::vector<std::pair<std::variant<Mod*, ServerModMetadata>, DownloadStatus>> serverModDownloadsList; // guh x2 (this builds but not map or unordered_map wtf)
 std::vector<TooltipMetadata> nodesToHoverList; // should be reset every frame idk?
 std::vector<Tooltip*> activeTooltipsList;
+std::unordered_map<std::string, std::string> tagDescriptionMap; // d
 
 bool isGeodeTheme(bool forceDisableTheme = false) {
 	return !forceDisableTheme && Loader::get()->getInstalledMod("geode.loader")->getSettingValue<bool>("enable-geode-theme");
@@ -644,40 +635,52 @@ void modPopupModify(CCNode* popup) {
 	}
 }
 
-void otherModPopupModify(FLAlertLayer* popup) {
+// this one runs every frame unlike the other one (for tooltips)
+void otherModPopupModify(CCLayerColor* popup) {
 	auto mod = Mod::get();
-	CCLayer* mainLayer = popup->m_mainLayer;
-	if (mainLayer) {
-		CCNode* tagsContainer = mainLayer->getChildByIDRecursive("tags-container"); // one of the only things with a node id like come on
-		if (tagsContainer) {
-			auto arr = CCArrayExt<CCNode*>(tagsContainer->getChildren());
-			for (CCNode* n : arr) {
-				if (auto label = n->getChildByType<CCLabelBMFont*>(0)) {
-					label->getString();
+	// geode::log::debug("spam");
+	CCNode* tagsContainer = popup->getChildByIDRecursive("tags-container"); // one of the only things with a node id like come on
+	if (tagsContainer && !serverTagList.empty()) {
+		// geode::log::debug("is that server tag list empty");
+		auto arr = CCArrayExt<CCNode*>(tagsContainer->getChildren());
+		for (CCNode* n : arr) {
+			if (auto label = n->getChildByType<CCLabelBMFont*>(0)) {
+				std::string tag = std::string(label->getString());
+				// ah yes ModSource::fetchValidTags
+				auto oServerTag = ranges::find(serverTagList, [&tag](ServerTag const& serverTag) {
+					return serverTag.displayName == tag;
+				});
+				// geode::log::debug("wowie {}", stag.has_value());
+				if (oServerTag.has_value()) {
+					ServerTag serverTag = oServerTag.value();
+					std::string tagDesc = fmt::format("No description found for tag {}", serverTag.displayName);
+					auto oTagDescPair = ranges::find(tagDescriptionMap, [&serverTag](std::pair<std::string, std::string> const& tagDescPair) {
+						return serverTag.name == tagDescPair.first;
+					});
+					if (oTagDescPair.has_value()) {
+						tagDesc = oTagDescPair.value().second;
+					}
+					if (mod->getSettingValue<bool>("tooltips-tag-popup-description")) {
+						auto tm = TooltipMetadata(n, tagDesc, true);
+						nodesToHoverList.push_back(tm);
+					}
 				}
 			}
 		}
 	}
 }
 
-#include <Geode/modify/FLAlertLayer.hpp>
+#include <Geode/modify/CCLayerColor.hpp>
 
-class $modify(CustomPopup, FLAlertLayer) {
-	bool init(FLAlertLayerProtocol* p0, char const* p1, gd::string p2, char const* p3, char const* p4, float p5, bool p6, float p7, float p8) {
-		if (!FLAlertLayer::init(p0, p1, p2, p3, p4, p5, p6, p7, p8)) return false;
+class $modify(CustomPopup, CCLayerColor) {
+	bool initWithColor(ccColor4B const& color, GLfloat width, GLfloat height) {
+		if (!CCLayerColor::initWithColor(color, width, height)) return false;
 
 		if (typeinfo_cast<ModPopup*>(this)) {
 			modPopupReference = this;
 		}
 
 		return true;
-	}
-
-	void removeFromParentAndCleanup(bool cleanup) {
-		if (typeinfo_cast<ModPopup*>(this)) {
-			modPopupReference = nullptr;
-		}
-		FLAlertLayer::removeFromParentAndCleanup(cleanup);
 	}
 };
 
@@ -746,6 +749,7 @@ class $modify(CCScheduler) {
 		if (debugDrawNode) {
 			debugDrawNode->clear();
 			debugDrawNode->setVisible(true);
+			debugDrawNode->setZOrder(CCDirector::sharedDirector()->getRunningScene()->getHighestChildZ());
 		}
 
 		const ccColor4F debugColor = ccColor4F{ 255/255.f, 175/255.f, 204/255.f, 255/255.f };
@@ -797,7 +801,7 @@ class $modify(CCScheduler) {
 							break;
 						}
 					}
-					std::reverse(arr.begin(), arr.end());
+					std::reverse(arr.begin(), arr.end()); // dont forget
 				}
 
 				bool withinLimitedArea = false;
@@ -1117,6 +1121,13 @@ web::WebTask GeodeWebHook(web::WebRequest* request, std::string_view method, std
 	return request->send(method, url);
 }
 
+void popupRFPACHook(FLAlertLayer* self, bool cleanup) {
+	if (typeinfo_cast<ModPopup*>(self)) {
+		modPopupReference = nullptr;
+	}
+	self->removeFromParentAndCleanup(cleanup);
+}
+
 // Imagine using geode's little ui events (they also dont work for my problems hehe)
 // Haha they actually work now time to remove that very stupid CCScheduler::update hook
 
@@ -1126,6 +1137,13 @@ $execute {
 		reinterpret_cast<void*>(addresser::getNonVirtual(&web::WebRequest::send)),
 		&GeodeWebHook,
 		"geode::web::WebRequest::send",
+		tulip::hook::TulipConvention::Thiscall
+	);
+
+	(void) Mod::get()->hook(
+		reinterpret_cast<void*>(geode::addresser::getVirtual(&FLAlertLayer::removeFromParentAndCleanup)),
+		&popupRFPACHook,
+		"FLAlertLayer::removeFromParentAndCleanup",
 		tulip::hook::TulipConvention::Thiscall
 	);
 
@@ -1151,4 +1169,25 @@ $on_mod(Loaded) {
 	auto mod = Mod::get();
 
 	if (mod->getSettingValue<bool>("debug-tooltips-draw")) makeDebugDrawNode();
+
+	// guh
+	tagDescriptionMap = {{"universal", "This mod affects the entire game"},
+						{"gameplay", "This mod affects mainly gameplay"},
+						{"editor", "This mod affects mainly the editor"},
+						{"offline", "This mod does not require an internet connection to work"},
+						{"online", "This mod requires an internet connection to work"},
+						{"enhancement", "This mod enhances or expands upon an existing GD feature"},
+						{"music", "This mod deals with music, such as adding more songs"},
+						{"interface", "This mod modifies the GD UI in notable ways (beyond just adding a new button)"},
+						{"bugfix", "This mod fixes existing bugs in the game"},
+						{"utility", "This mod provides tools that simplify working with the game and its levels"},
+						{"performance", "This mod optimizes existing GD features"},
+						{"customization", "This mod adds new customization options to existing GD features"},
+						{"content", "This mod adds new content (new levels, gamemodes, etc.)"},
+						{"developer", "This mod is intended for mod developers only"},
+						{"cheat", "This mod adds cheats like noclip"},
+						{"paid", "This mod contains paid content, like a Pro tier, or if the mod acts as an installer for a fully paywalled mod"},
+						{"joke", "This mod is a joke."},
+						{"modtober24", "This mod is a part of the Modtober 2024 Contest"},
+						{"modtober24winner", "This mod is the winner of the Modtober 2024 Contest"}};
 }

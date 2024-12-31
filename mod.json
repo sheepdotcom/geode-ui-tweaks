@@ -1,5 +1,5 @@
 {
-	"geode": "4.1.1",
+	"geode": "4.1.2",
 	"gd": {
 		"win": "2.2074",
 		"android": "2.2074",
@@ -8,7 +8,7 @@
 	},
 	"id": "sheepdotcom.geode-ui-tweaks",
 	"name": "Geode UI Tweaks",
-	"version": "v0.2.0-alpha.1",
+	"version": "v0.2.0-alpha.2",
 	"developer": "sheepdotcom",
 	"description": "Tweak the Geode UI a bit more.",
 	"tags": ["customization", "interface"],
@@ -122,6 +122,12 @@
 		"tooltips-mod-list-description": {
 			"name": "Mod List Description",
 			"description": "Display the description of a mod in the mod list",
+			"type": "bool",
+			"default": false
+		},
+		"tooltips-tag-popup-description": {
+			"name": "Mod Popup Tag Description",
+			"description": "Display the description of a tag in the mod popup",
 			"type": "bool",
 			"default": false
 		},

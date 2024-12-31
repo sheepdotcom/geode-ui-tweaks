@@ -2,8 +2,15 @@
 
 Tweak the Geode Mod List UI a bit.
 
+Most settings are OFF by default, so please take a good look at the mod settings and try out each feature.
+
 ## <cr>WARNING</cr>
 <cr>This mod could potentially crash if certain changes are made to geode, due to certain methods used in this mod, though the chance of most of them being changed are very slim, though it is not zero.</cr>
+
+### Bugs to fix
+
+- Transparent lists
+  - Updating multiple mods makes colors flash for some reason
 
 ### Features
 
@@ -11,6 +18,7 @@ Tweak the Geode Mod List UI a bit.
 - Small changes to the mod list
 - Custom tooltips in mod popup and mod list
   - Description when hovering mod in mod list
+  - Tag descriptions in mod popup
 - Other things
 
 ### Planned Features (oh no)

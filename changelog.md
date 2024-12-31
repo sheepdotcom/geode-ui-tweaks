@@ -2,6 +2,7 @@
 
 - Fixed transparent lists on android
 - Custom tooltips
+- Basic debug tools
 
 # v0.2.0-alpha.1
 
