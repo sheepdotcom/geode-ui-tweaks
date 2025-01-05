@@ -1,3 +1,8 @@
+# v0.2.0-alpha.3
+
+- Setting for tooltip background opacity
+- More places for tooltips
+
 # v0.2.0-alpha.2
 
 - Fixed transparent lists on android

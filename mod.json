@@ -28,8 +28,8 @@
 			"default": false
 		},
 		"list-bg-transparency": {
-			"name": "List Background Transparency",
-			"description": "Change the transparency of the background behind the mod list.",
+			"name": "List Background Opacity",
+			"description": "Change the opacity of the background behind the mod list.",
 			"type": "int",
 			"control": {"slider": true, "slider-step": 5, "arrows": true, "arrow-step": 5, "big-arrows": true, "big-arrow-step": 25, "input": true},
 			"default": 100,
@@ -119,17 +119,51 @@
 			"type": "bool",
 			"default": false
 		},
+		"tooltips-opacity": {
+			"name": "Background Opacity",
+			"description": "Change the opacity of the tooltip background",
+			"type": "int",
+			"control": {"slider": true, "slider-step": 5, "arrows": true, "arrow-step": 5, "big-arrows": true, "big-arrow-step": 25, "input": true},
+			"default": 150,
+			"min": 0,
+			"max": 255,
+			"enable-if": "tooltips",
+			"enable-if-description": "Enable Tooltips"
+		},
 		"tooltips-mod-list-description": {
 			"name": "Mod List Description",
 			"description": "Display the description of a mod in the mod list",
 			"type": "bool",
-			"default": false
+			"default": false,
+			"enable-if": "tooltips",
+			"enable-if-description": "Enable Tooltips"
+		},
+		"tooltips-mod-list-developers": {
+			"name": "Mod List Developers",
+			"description": "Display all the developers of a mod in the mod list",
+			"type": "bool",
+			"default": false,
+			"enable-if": "tooltips",
+			"enable-if-description": "Enable Tooltips"
+		},
+		"tooltips-developers-min-count": {
+			"name": "Developer Min Count",
+			"description": "Minimum amount of developers required to display the tooltip",
+			"type": "int",
+			"control": {"slider": true, "slider-step": 1, "arrows": true, "arrow-step": 1, "big-arrows": false},
+			"default": 3,
+			"min": 0,
+			"max": 10,
+			"enable-if": "tooltips-mod-list-developers",
+			"enable-if-description": "Enable Mod List Developers"
 		},
 		"tooltips-tag-popup-description": {
 			"name": "Mod Popup Tag Description",
 			"description": "Display the description of a tag in the mod popup",
 			"type": "bool",
-			"default": false
+			"default": false,
+			"enable-if": "tooltips",
+			"enable-if-description": "Enable Tooltips"
 		},
 		"misc-title": {
 			"name": "Miscellaneous",

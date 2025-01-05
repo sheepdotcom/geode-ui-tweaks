@@ -7,6 +7,8 @@
 #include "Geode/loader/Loader.hpp"
 #include "Geode/loader/Setting.hpp"
 #include "Geode/ui/SceneManager.hpp"
+#include "Geode/ui/ScrollLayer.hpp"
+#include "Geode/ui/TextRenderer.hpp"
 #include "Geode/utils/addresser.hpp"
 #include "Geode/utils/cocos.hpp"
 #include "Geode/utils/web.hpp"
@@ -111,7 +113,17 @@ void appendServerModDownloadsList(std::variant<Mod*, ServerModMetadata> mod, Dow
 	size_t i = 0;
 	//geode::log::debug("APPENDING");
 	for (auto m : serverModDownloadsList) {
-		if ((std::holds_alternative<Mod*>(m.first) && std::holds_alternative<Mod*>(mod)) || (std::holds_alternative<ServerModMetadata>(m.first) && std::holds_alternative<ServerModMetadata>(mod))) {
+		std::string id;
+		std::string id2;
+		std::visit(geode::utils::makeVisitor{
+			[&](Mod* vMod) {id = vMod->getID();},
+			[&](ServerModMetadata metadata) {id = metadata.id;}
+		}, m.first);
+		std::visit(geode::utils::makeVisitor{
+			[&](Mod* vMod) {id2 = vMod->getID();},
+			[&](ServerModMetadata metadata) {id2 = metadata.id;}
+		}, mod);
+		if (id == id2) {
 			serverModDownloadsList[i] = std::make_pair(mod, status);
 			return;
 		}
@@ -190,6 +202,25 @@ void removeDebugDrawNode() {
 		debugDrawNode->clear();
 		SceneManager::get()->forget(debugDrawNode);
 		debugDrawNode->removeFromParentAndCleanup(false);
+	}
+}
+
+std::string formatAllDevelopers(std::vector<std::string> developers) {
+	switch (developers.size()) {
+		case 0: return "Unknown"; break;
+		case 1: return developers.front(); break;
+		case 2: return developers.front() + " & " + developers.back(); break;
+		default: {
+			size_t i = 0;
+			std::string out;
+			for (const std::string& dev : developers) {
+				if (out.empty()) out = dev;
+				else if ((developers.size() - 1) <= i) out = out + ", and " + dev;
+				else out = out + ", " + dev;
+				i++;
+			}
+			return out;
+		} break;
 	}
 }
 
@@ -369,7 +400,9 @@ void modsLayerModify(CCNode* modsLayer) {
 				searchBG->setVisible(!mod->getSettingValue<bool>("transparent-lists"));
 				someBG->setVisible(mod->getSettingValue<bool>("transparent-lists"));
 			}
+			size_t minDevCount = mod->getSettingValue<size_t>("tooltips-developers-min-count");
 			if (auto scrollLayer = static_cast<ScrollLayer*>(modList->getChildByID("ScrollLayer"))) {
+				CCRect limitedArea = CCRect(scrollLayer->convertToWorldSpace(scrollLayer->getAnchorPoint()), scrollLayer->getContentSize() * getRecursiveScale(scrollLayer, {1.f, 1.f}));
 				auto scrollArr = CCArrayExt<CCNode*>(scrollLayer->m_contentLayer->getChildren());
 				for (auto node : scrollArr) {
 					// should be mod items right
@@ -386,6 +419,7 @@ void modsLayerModify(CCNode* modsLayer) {
 									nMetadata = metadata.versions.front().metadata;
 								}
 							}, nMod);
+							std::vector<std::string> developers = nMetadata.getDevelopers();
 							// empty string / only spaces checker
 							std::optional<std::string> oDescription = nMetadata.getDescription();
 							std::string description = oDescription.value_or("[No Description Provided]");
@@ -395,10 +429,29 @@ void modsLayerModify(CCNode* modsLayer) {
 								description = "[No Description Provided]";
 							}
 
-							if (mod->getSettingValue<bool>("tooltips-mod-list-description")) {
-								CCRect rect = CCRect(scrollLayer->convertToWorldSpace(scrollLayer->getAnchorPoint()), scrollLayer->getContentSize() * getRecursiveScale(scrollLayer, {1.f, 1.f}));
-								auto tm = TooltipMetadata(node, description, true, rect);
-								nodesToHoverList.push_back(tm);
+							auto infoContainer = node->getChildByID("info-container");
+							if (infoContainer) {
+								auto titleContainer = infoContainer->getChildByID("title-container");
+								auto developersMenu = infoContainer->getChildByID("developers-menu");
+								if (titleContainer) {
+									auto titleLabel = titleContainer->getChildByID("title-label");
+									auto badgeContainer = titleContainer->getChildByID("badge-container");
+									if (titleLabel) {
+										if (mod->getSettingValue<bool>("tooltips-mod-list-description")) {
+											auto tm = TooltipMetadata(titleLabel, description, true, limitedArea);
+											nodesToHoverList.push_back(tm);
+										}
+									}
+								}
+								if (developersMenu) {
+									auto developersButton = developersMenu->getChildByID("developers-button");
+									if (developersButton) {
+										if (mod->getSettingValue<bool>("tooltips-mod-list-developers") && (developers.size() >= minDevCount)) {
+											auto tm = TooltipMetadata(developersButton, formatAllDevelopers(developers), true, limitedArea);
+											nodesToHoverList.push_back(tm);
+										}
+									}
+								}
 							}
 						}
 					}
@@ -668,6 +721,25 @@ void otherModPopupModify(CCLayerColor* popup) {
 			}
 		}
 	}
+	CCNode* descriptionContainer = popup->getChildByIDRecursive("description-container");
+	if (descriptionContainer) {
+		MDTextArea* textArea = descriptionContainer->getChildByType<MDTextArea*>(0);
+		if (textArea) {
+			CCScrollLayerExt* scrollLayer = textArea->getScrollLayer(); // if this is nullptr then most likely something else has broken before this
+			CCMenu* content = scrollLayer->m_contentLayer->getChildByType<CCMenu*>(0);
+			if (content) {
+				CCArrayExt<CCNode*> arr = CCArrayExt<CCNode*>(content->getChildren());
+				for (CCNode* n : arr) {
+					// hyperlink
+					if (typeinfo_cast<TextLinkedButtonWrapper*>(n)) {
+						std::string href = std::string(as<CCString*>(n->getUserObject())->getCString());
+						auto tm = TooltipMetadata(n, href, true);
+						nodesToHoverList.push_back(tm);
+					}
+				}
+			}
+		}
+	}
 }
 
 #include <Geode/modify/CCLayerColor.hpp>
@@ -835,7 +907,7 @@ class $modify(CCScheduler) {
 
 				if ((mousePos >= bottomLeft && mousePos <= topRight) && withinLimitedArea && !isCoveredUp) {
 					if (!alreadyHovered) {
-						auto tooltip = Tooltip::create(node, text, 0.2f, 300.f, 150.f);
+						auto tooltip = Tooltip::create(node, text, 0.2f, 300.f, mod->getSettingValue<int>("tooltips-opacity"));
 						if (tooltip) {
 							tooltip->setID("Tooltip"_spr);
 							tooltip->show(scene);

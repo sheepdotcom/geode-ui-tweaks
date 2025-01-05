@@ -9,16 +9,16 @@ Most settings are OFF by default, so please take a good look at the mod settings
 
 ### Bugs to fix
 
-- Transparent lists
-  - Updating multiple mods makes colors flash for some reason
+- Havent found any yet
 
 ### Features
 
 - Transparent mod list
-- Small changes to the mod list
+- Other smaller changes to the mod list
 - Custom tooltips in mod popup and mod list
   - Description when hovering mod in mod list
   - Tag descriptions in mod popup
+  - Display link when hovering hyperlinks in mod popup
 - Other things
 
 ### Planned Features (oh no)
@@ -29,8 +29,6 @@ Most settings are OFF by default, so please take a good look at the mod settings
   - More info about tags
   - Popup:
     - More info about time released and updated
-    - More info about tags
-    - More Info about any kind of hyperlink on the popup
   - List:
     - Hover for full download count
 - Viewing and installing different versions of mods
