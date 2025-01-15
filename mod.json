@@ -130,7 +130,7 @@
 			"enable-if": "tooltips",
 			"enable-if-description": "Enable Tooltips"
 		},
-		"tooltips-mod-list-description": {
+		"tooltips-list-mod-description": {
 			"name": "Mod List Description",
 			"description": "Display the description of a mod in the mod list",
 			"type": "bool",
@@ -138,7 +138,7 @@
 			"enable-if": "tooltips",
 			"enable-if-description": "Enable Tooltips"
 		},
-		"tooltips-mod-list-developers": {
+		"tooltips-list-mod-developers": {
 			"name": "Mod List Developers",
 			"description": "Display all the developers of a mod in the mod list",
 			"type": "bool",
@@ -157,7 +157,15 @@
 			"enable-if": "tooltips-mod-list-developers",
 			"enable-if-description": "Enable Mod List Developers"
 		},
-		"tooltips-tag-popup-description": {
+		"tooltips-list-tag-description": {
+			"name": "Mod List Tag Description",
+			"description": "Display the description of a tag in the mod list",
+			"type": "bool",
+			"default": false,
+			"enable-if": "tooltips",
+			"enable-if-description": "Enable Tooltips"
+		},
+		"tooltips-popup-tag-description": {
 			"name": "Mod Popup Tag Description",
 			"description": "Display the description of a tag in the mod popup",
 			"type": "bool",
@@ -191,12 +199,6 @@
 			"name": "Debug",
 			"description": "For debugging purposes only",
 			"type": "title"
-		},
-		"debug-tooltips-draw": {
-			"name": "Draw tooltip hover area",
-			"description": "Show a rectange around the areas that would trigger a tooltip to be created",
-			"type": "bool",
-			"default": false
 		}
 	}
 }

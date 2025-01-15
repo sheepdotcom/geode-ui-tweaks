@@ -2,6 +2,7 @@
 
 - Setting for tooltip background opacity
 - More places for tooltips
+- Remove the only debug tool
 
 # v0.2.0-alpha.2
 

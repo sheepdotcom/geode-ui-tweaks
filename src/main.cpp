@@ -39,7 +39,6 @@ using namespace geode::prelude;
 // this might be the main thing stopping me from like separating all my stuff to different files
 CCNode* modsLayerReference = nullptr;
 CCLayerColor* modPopupReference = nullptr;
-CCDrawNode* debugDrawNode = nullptr;
 std::vector<size_t> proxyIDList; // Idk
 std::vector<ServerModMetadata> serverModList;
 std::vector<ServerModUpdate> serverModUpdateList;
@@ -181,28 +180,6 @@ protected:
 
 Tooltip::~Tooltip() { // hehe
 	activeTooltipsList.erase(std::remove(activeTooltipsList.begin(), activeTooltipsList.end(), this), activeTooltipsList.end());
-}
-
-void makeDebugDrawNode() {
-	if (!debugDrawNode) {
-		debugDrawNode = CCDrawNode::create();
-		debugDrawNode->retain();
-		debugDrawNode->setID("debug-draw-node"_spr);
-		debugDrawNode->setZOrder(99);
-		_ccBlendFunc blendFunc;
-		blendFunc.src = GL_SRC_ALPHA;
-		blendFunc.dst = GL_ONE_MINUS_SRC_ALPHA;
-		debugDrawNode->setBlendFunc(blendFunc);
-	}
-	SceneManager::get()->keepAcrossScenes(debugDrawNode);
-}
-
-void removeDebugDrawNode() {
-	if (debugDrawNode) {
-		debugDrawNode->clear();
-		SceneManager::get()->forget(debugDrawNode);
-		debugDrawNode->removeFromParentAndCleanup(false);
-	}
 }
 
 std::string formatAllDevelopers(std::vector<std::string> developers) {
@@ -505,9 +482,10 @@ void modItemModify(CCNode* node) {
 					appendServerMod(metadata);
 				}
 			}, nMod);
-			if (auto lMod = Loader::get()->getInstalledMod(id)) { // put some things in here to MAKE SURE nothing breaks
+			// check for if the mod is installed, not if it is currently in the installed tab
+			if (auto lMod = Loader::get()->getInstalledMod(id)) {
 				requestedAction = static_cast<size_t>(lMod->getRequestedAction());
-				restartRequired = (requestedAction != 0) || (ModSettingsManager::from(lMod)->restartRequired());
+				restartRequired = ModSettingsManager::from(lMod)->restartRequired();
 			}
 			//geode::log::debug("nya_uwugayreal {} {} {}", id, requestedAction, restartRequired);
 			for (auto m : serverModDownloadsList) {
@@ -713,7 +691,7 @@ void otherModPopupModify(CCLayerColor* popup) {
 					if (oTagDescPair.has_value()) {
 						tagDesc = oTagDescPair.value().second;
 					}
-					if (mod->getSettingValue<bool>("tooltips-tag-popup-description")) {
+					if (mod->getSettingValue<bool>("tooltips-popup-tag-description")) {
 						auto tm = TooltipMetadata(n, tagDesc, true);
 						nodesToHoverList.push_back(tm);
 					}
@@ -816,16 +794,6 @@ class $modify(CCScheduler) {
 		auto mod = Mod::get();
 		CCSize winSize = CCDirector::sharedDirector()->getWinSize();
 
-		if (mod->getSettingValue<bool>("debug-tooltips-draw")) makeDebugDrawNode();
-		
-		if (debugDrawNode) {
-			debugDrawNode->clear();
-			debugDrawNode->setVisible(true);
-			debugDrawNode->setZOrder(CCDirector::sharedDirector()->getRunningScene()->getHighestChildZ());
-		}
-
-		const ccColor4F debugColor = ccColor4F{ 255/255.f, 175/255.f, 204/255.f, 255/255.f };
-
 		// not even devs using cocos know how to code
 		std::vector<Tooltip*> orphanedTooltips = activeTooltipsList;
 		if (mod->getSettingValue<bool>("tooltips")) {
@@ -879,30 +847,6 @@ class $modify(CCScheduler) {
 				bool withinLimitedArea = false;
 				if (mousePos >= limitedArea.origin && mousePos <= limitedArea.origin + limitedArea.size) {
 					withinLimitedArea = true;
-				}
-
-				if (mod->getSettingValue<bool>("debug-tooltips-draw") && debugDrawNode) {
-					CCPoint maxTopRight = limitedArea.origin + limitedArea.size;
-					bool shouldDrawDebug = true;
-					if (isCoveredUp) {
-						shouldDrawDebug = false;
-					}
-					if (topRight.x < limitedArea.origin.x || bottomLeft.x > maxTopRight.x) {
-						shouldDrawDebug = false;
-					} else if (topRight.y < limitedArea.origin.y || bottomLeft.y > maxTopRight.y) {
-						shouldDrawDebug = false;
-					}
-					if (shouldDrawDebug) {
-						CCPoint dTopRight = ccp(std::fmin(topRight.x, maxTopRight.x), std::fmin(topRight.y, maxTopRight.y));
-						CCPoint dBottomLeft = ccp(std::fmax(bottomLeft.x, limitedArea.origin.x), std::fmax(bottomLeft.y, limitedArea.origin.y));
-						CCPoint dTopLeft = ccp(dBottomLeft.x, dTopRight.y);
-						CCPoint dBottomRight = ccp(dTopRight.x, dBottomLeft.y);
-						float thickness = .5f;
-						debugDrawNode->drawSegment(dTopLeft, dTopRight, thickness, debugColor);
-						debugDrawNode->drawSegment(dTopRight, dBottomRight, thickness, debugColor);
-						debugDrawNode->drawSegment(dBottomRight, dBottomLeft, thickness, debugColor);
-						debugDrawNode->drawSegment(dBottomLeft, dTopLeft, thickness, debugColor);
-					}
 				}
 
 				if ((mousePos >= bottomLeft && mousePos <= topRight) && withinLimitedArea && !isCoveredUp) {
@@ -1227,20 +1171,10 @@ $execute {
 		modPopupModify(event->getPopup());
 		return ListenerResult::Propagate;
 	});
-
-	listenForSettingChanges("debug-tooltips-draw", [](bool value) {
-		if (value) {
-			makeDebugDrawNode();
-		} else {
-			removeDebugDrawNode();
-		}
-	});
 }
 
 $on_mod(Loaded) {
 	auto mod = Mod::get();
-
-	if (mod->getSettingValue<bool>("debug-tooltips-draw")) makeDebugDrawNode();
 
 	// guh
 	tagDescriptionMap = {{"universal", "This mod affects the entire game"},
